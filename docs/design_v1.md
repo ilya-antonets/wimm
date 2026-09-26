@@ -716,12 +716,15 @@
           """
           For each transaction_id, run Phase 1 then Phase 2.
   
+          Cache refresh (runs before Phase 1 and Phase 2):
+            If not self._cache_valid: _rebuild_cache(db)
+            This ensures _exact_cache and _train_matrix reflect the current mapping state.
+  
           Phase 1 — Exact payee match:
             normalize(description) = upper().re.sub(r'[^A-Z ]', '', '').re.sub(r' +', ' ', '').strip()
             If normalize(description) in self._exact_cache → return (category_id, 1.0, 'exact')
   
           Phase 2 — TF-IDF cosine similarity:
-            If not self._cache_valid: _rebuild_cache(db)
             If _train_matrix is None (< ml_min_training_samples): skip, return no suggestion.
             Transform query description with self._vectorizer.
             Compute cosine_similarity(query_vec, self._train_matrix) → similarities array.
@@ -736,6 +739,10 @@
   
       def _rebuild_cache(self, db: Session) -> None:
           """
+          Acquires _lock for the entire rebuild to prevent concurrent readers
+          from seeing partially-written state. Double-checked: if another thread
+          already set _cache_valid=True by the time the lock is acquired, returns
+          immediately without re-fitting.
           Queries all mappings joined to transactions.
           If count < settings.ml_min_training_samples: sets _train_matrix=None, marks cache valid.
           Otherwise:
@@ -747,7 +754,7 @@
                 sublinear_tf=True,    # log(1+tf) dampens high-frequency tokens
             ) on all description strings.
             Stores sparse matrix and label list.
-          Sets _cache_valid=True inside lock.
+          Sets _cache_valid=True before releasing lock.
           """
   ```
   
@@ -815,9 +822,11 @@
          WHERE category_id IN (collected_ids + [category_id])
       3. DELETE FROM categories WHERE id IN (collected_ids + [category_id])
          (order: children before parents — sort by depth DESC or use DELETE with WHERE id IN subtree)
-      4. Call suggester.invalidate() so the vectorizer re-fits on the next Sankey build or
+      4. db.commit() — commit before invalidating the ML cache so a rollback
+         cannot leave the cache dirty while the category still exists in the DB.
+      5. Call suggester.invalidate() so the vectorizer re-fits on the next Sankey build or
          suggestion request — preventing the deleted category_id from appearing in ML output.
-      Executes in a single transaction; no orphaned mappings possible.
+      Steps 1–3 execute in a single transaction; no orphaned mappings possible.
       """
   
   def _get_subtree_ids(db: Session, root_id: int) -> list[int]:
@@ -826,8 +835,9 @@
       Returns list[int].
       """
   
-  def _assert_no_cycle(db: Session, category_id: int, new_parent_id: int) -> None:
-      """Raises ValueError if new_parent_id is within the subtree of category_id."""
+  def _assert_no_cycle(db: Session, category_id: int, new_parent_id: int | None) -> None:
+      """Raises ValueError if new_parent_id is within the subtree of category_id.
+      No-op when new_parent_id is None (moving to root)."""
   ```
   
   ---
@@ -1988,10 +1998,12 @@
                    WHERE t.type = 'expense'
                      AND t.date BETWEEN :date_from AND :date_to
   
+    expense_amounts: dict[tx_id → float] = {}         # tx_id → amount for Step 4
     mapped_by_tx:   dict[tx_id → category_id] = {}   # explicit user mappings
     unmapped_ids:   list[int] = []
   
     FOR row IN expense_rows:
+      expense_amounts[row.id] = float(row.amount)
       IF row.category_id IS NOT NULL:
         mapped_by_tx[row.id] = row.category_id
       ELSE:
@@ -2180,7 +2192,7 @@
         context: ./frontend
         dockerfile: Dockerfile
         args:
-          VITE_API_BASE_URL: "http://localhost:8000/api"
+          VITE_API_BASE_URL: "/api"
       container_name: wimm-frontend
       restart: unless-stopped
       ports:
@@ -2196,7 +2208,7 @@
       name: wimm_data
   ```
   
-  **Note on `VITE_API_BASE_URL`:** Vite bakes env vars into the static bundle at build time. The `args` key passes it as a Docker build arg into the Dockerfile, which sets it as a build-time env var. When running in production (browser calls `localhost:8000` directly), this value is correct. For dev without Docker, `.env` file in `frontend/` overrides it.
+  **Note on `VITE_API_BASE_URL`:** Vite bakes env vars into the static bundle at build time. The `args` key passes it as a Docker build arg into the Dockerfile, which sets it as a build-time env var. The value `/api` is correct in both Docker and dev: nginx proxies `/api/` to the backend container, so the browser never needs to know the backend port. For local dev without Docker, set `VITE_API_BASE_URL=http://localhost:8000/api` in `frontend/.env`.
   
   ---
   
@@ -2256,7 +2268,7 @@
   
   COPY . .
   
-  ARG VITE_API_BASE_URL=http://localhost:8000/api
+  ARG VITE_API_BASE_URL=/api
   ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
   
   RUN npm run build
@@ -2431,6 +2443,7 @@
   
   ```python
   import pytest
+  from contextlib import asynccontextmanager
   from sqlalchemy import create_engine
   from sqlalchemy.orm import sessionmaker
   from fastapi.testclient import TestClient
@@ -2460,6 +2473,11 @@
   @pytest.fixture(scope="function")
   def client(db):
       app.dependency_overrides[get_db] = lambda: db
+      # Override lifespan to skip Alembic subprocess against the real database
+      @asynccontextmanager
+      async def noop_lifespan(app):
+          yield
+      app.router.lifespan_context = noop_lifespan
       with TestClient(app) as c:
           yield c
       app.dependency_overrides.clear()
@@ -2469,6 +2487,7 @@
   
   ```python
   import factory
+  import uuid
   from factory.alchemy import SQLAlchemyModelFactory
   from app.models import Bank, Transaction, Category, Mapping
   
@@ -2491,7 +2510,7 @@
       description = factory.Faker("sentence", nb_words=4)
       type = "expense"
       dedup_key = factory.LazyAttribute(lambda o: f"test:{o.description[:20]}")
-  
+      dedup_key = factory.LazyAttribute(lambda o: f"test:{uuid.uuid4().hex}")
   class CategoryFactory(SQLAlchemyModelFactory):
       class Meta:
           model = Category
