@@ -761,13 +761,17 @@
   **Module-level singleton accessor used by the router:**
   
   ```python
+  import threading
   _suggester: MLSuggester | None = None
+  _suggester_lock = threading.Lock()
   
   def get_suggester() -> MLSuggester:
       global _suggester
       if _suggester is None:
-          from app.config import settings
-          _suggester = MLSuggester(settings=settings)
+          with _suggester_lock:
+              if _suggester is None:
+                  from app.config import settings
+                  _suggester = MLSuggester(settings=settings)
       return _suggester
   ```
   
@@ -822,10 +826,9 @@
          WHERE category_id IN (collected_ids + [category_id])
       3. DELETE FROM categories WHERE id IN (collected_ids + [category_id])
          (order: children before parents — sort by depth DESC or use DELETE with WHERE id IN subtree)
-      4. db.commit() — commit before invalidating the ML cache so a rollback
-         cannot leave the cache dirty while the category still exists in the DB.
-      5. Call suggester.invalidate() so the vectorizer re-fits on the next Sankey build or
-         suggestion request — preventing the deleted category_id from appearing in ML output.
+      4. Call suggester.invalidate() to mark the ML cache stale before committing; if the
+         commit later fails the cache is unnecessarily cold but never stale-with-deleted-data.
+      5. db.commit() — DB and cache are now in sync: either both updated or both unchanged.
       Steps 1–3 execute in a single transaction; no orphaned mappings possible.
       """
   
@@ -1429,6 +1432,9 @@
     tooltip: {
       trigger: "item",
       formatter: (params: any) => {
+        if (params.dataType === "edge") {
+          return `${params.data.source} → ${params.data.target}: ${params.value}`;
+        }
         const node = payload.nodes.find(n => n.id === params.name);
         return `${node?.name ?? params.name}: ${params.value}`;
       },
@@ -2477,10 +2483,12 @@
       @asynccontextmanager
       async def noop_lifespan(app):
           yield
+      original_lifespan = app.router.lifespan_context
       app.router.lifespan_context = noop_lifespan
       with TestClient(app) as c:
           yield c
-      app.dependency_overrides.clear()
+      del app.dependency_overrides[get_db]
+      app.router.lifespan_context = original_lifespan
   ```
   
   **`tests/factories.py`**
@@ -2509,7 +2517,6 @@
       amount = factory.Faker("pydecimal", left_digits=4, right_digits=2, positive=False)
       description = factory.Faker("sentence", nb_words=4)
       type = "expense"
-      dedup_key = factory.LazyAttribute(lambda o: f"test:{o.description[:20]}")
       dedup_key = factory.LazyAttribute(lambda o: f"test:{uuid.uuid4().hex}")
   class CategoryFactory(SQLAlchemyModelFactory):
       class Meta:
