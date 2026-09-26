@@ -132,7 +132,7 @@
   **`app/config.py`:**
   
   ```python
-  from pydantic_settings import BaseSettings
+  from pydantic_settings import BaseSettings, SettingsConfigDict
   
   class Settings(BaseSettings):
       database_url: str = "sqlite:////data/wimm.db"
@@ -424,11 +424,11 @@
   if existing:
       existing.category_id = body.category_id
       db.commit()
-      return Response(status_code=200, content=MappingRead.from_orm(existing).model_dump_json())
+      return Response(status_code=200, content=MappingRead.model_validate(existing, from_attributes=True).model_dump_json())
   else:
       mapping = Mapping(transaction_id=body.transaction_id, category_id=body.category_id)
       db.add(mapping); db.commit(); db.refresh(mapping)
-      return Response(status_code=201, content=MappingRead.from_orm(mapping).model_dump_json())
+      return Response(status_code=201, content=MappingRead.model_validate(mapping, from_attributes=True).model_dump_json())
   ```
   The `UNIQUE` constraint on `mappings.transaction_id` is a safety net, not the upsert mechanism — the explicit check-then-update pattern avoids a REPLACE overwriting the PK and is cleaner for returning correct HTTP codes.
   
@@ -759,7 +759,8 @@
   def get_suggester() -> MLSuggester:
       global _suggester
       if _suggester is None:
-          _suggester = MLSuggester()
+          from app.config import settings
+          _suggester = MLSuggester(settings=settings)
       return _suggester
   ```
   
@@ -896,7 +897,6 @@
       5. Builds category nodes (only for categories with amount > 0 in period).
       Returns nodes, links from EXPENSES node to category nodes, and total expenses sum.
       """
-      """
   
   def _balance_node_and_link(
       income: float,
@@ -917,7 +917,7 @@
   
   ```python
   from __future__ import annotations
-  from datetime import date, datetime
+  from datetime import date, datetime, timezone
   from decimal import Decimal
   from typing import Optional
   from sqlalchemy import (
@@ -954,7 +954,7 @@
   
       id:          Mapped[int]      = mapped_column(Integer, primary_key=True)
       bank_id:     Mapped[int]      = mapped_column(Integer, ForeignKey("banks.id", ondelete="RESTRICT"), nullable=False)
-      imported_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+      imported_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
       filename:    Mapped[str]      = mapped_column(Text, nullable=False)
   
       bank:         Mapped[Bank]             = relationship("Bank", back_populates="import_batches")
@@ -1404,22 +1404,31 @@
       type: "sankey",
       layout: "none",
       emphasis: { focus: "adjacency" },
-      data: payload.nodes.map(n => ({ name: n.name })),
+      data: payload.nodes.map(n => ({
+        name: n.id,                          // ECharts key — must match link source/target
+        label: { formatter: () => n.name },  // human-readable display label
+      })),
       links: payload.links.map(l => ({
-        source: l.source,
+        source: l.source,   // SankeyNode.id — matches data[].name above
         target: l.target,
         value: l.value,
       })),
       label: { position: "right" },
       lineStyle: { color: "gradient", opacity: 0.4 },
     }],
-    tooltip: { trigger: "item", formatter: "{b}: {c}" },
+    tooltip: {
+      trigger: "item",
+      formatter: (params: any) => {
+        const node = payload.nodes.find(n => n.id === params.name);
+        return `${node?.name ?? params.name}: ${params.value}`;
+      },
+    },
   };
   ```
   
   **Node click interaction:**
   - ECharts `onEvents={{ click: handleNodeClick }}`.
-  - `handleNodeClick` receives `{ name }` from ECharts — map back to the node using `payload.nodes.find(n => n.name === name)`.
+  - `handleNodeClick` receives `{ name }` from ECharts — `name` holds the node's `id`; map back to the node using `payload.nodes.find(n => n.id === name)`.
   - If the clicked node has `transaction_ids` (it is an expense category node): call `store.openSankeyPanel(node.id, node.name, node.transaction_ids)` to open the drill-down panel.
   - Income and separator nodes (PROFICIT/DEFICIT/EXPENSES) have no `transaction_ids` — clicks are ignored.
   
@@ -2072,7 +2081,7 @@
         value  = node_totals[cat_id],
       ))
   
-    ── Step 8: Balance node ────────────────────────────────────────────────────
+    ── Step 9: Balance node ────────────────────────────────────────────────────
     balance = total_income - total_expenses
     balance_node = None
     balance_link = None
@@ -2080,19 +2089,6 @@
     IF balance > 0:
       # Income exceeds expenses → Proficit on income side
       balance_node = SankeyNode(id=PROFICIT_NODE_ID, name="Proficit")
-      balance_link = SankeyLink(
-        source = PROFICIT_NODE_ID,  # ← NOTE: ECharts Sankey allows bidirectional;
-        # actually: income → proficit. ECharts renders this correctly when
-        # proficit is treated as a sink on the left side of the diagram.
-        # Implementation: add a synthetic income node for proficit.
-        source = f"proficit_source",
-        target = PROFICIT_NODE_ID,
-        value  = balance,
-      )
-      # Add a synthetic link from total_income pool:
-      # The EXPENSES node received total_income worth of flow.
-      # The "missing" flow from EXPENSES to Proficit is the surplus.
-      # Correct ECharts model:
       balance_link = SankeyLink(
         source = EXPENSES_NODE_ID,
         target = PROFICIT_NODE_ID,
@@ -2111,7 +2107,7 @@
         value  = abs(balance),
       )
   
-    ── Step 9: Assemble final payload ─────────────────────────────────────────
+    ── Step 10: Assemble final payload ─────────────────────────────────────────
     all_nodes = income_nodes + expense_nodes
     all_links = income_links + expense_links
   
@@ -2439,7 +2435,7 @@
   from sqlalchemy.orm import sessionmaker
   from fastapi.testclient import TestClient
   
-  from app.main import create_app
+  from app.main import app
   from app.database import get_db
   from app.models import Base
   
@@ -2463,10 +2459,10 @@
   
   @pytest.fixture(scope="function")
   def client(db):
-      app = create_app()
       app.dependency_overrides[get_db] = lambda: db
       with TestClient(app) as c:
           yield c
+      app.dependency_overrides.clear()
   ```
   
   **`tests/factories.py`**
@@ -3374,7 +3370,7 @@
           return response
   ```
   
-  Register it in `create_app()` before the CORS middleware so all requests are timed.
+  Register it in `app/main.py` before the CORS middleware so all requests are timed.
   
   #### What to Log and at Which Level
   
