@@ -107,7 +107,7 @@
   **`app/database.py`:**
   
   ```python
-  from sqlalchemy import create_engine
+  from sqlalchemy import create_engine, event
   from sqlalchemy.orm import sessionmaker, DeclarativeBase
   from app.config import settings
   
@@ -116,6 +116,13 @@
       connect_args={"check_same_thread": False},  # SQLite only
       echo=settings.sql_echo,
   )
+  
+  @event.listens_for(engine, "connect")
+  def set_sqlite_pragma(dbapi_connection, connection_record):
+      cursor = dbapi_connection.cursor()
+      cursor.execute("PRAGMA foreign_keys=ON")
+      cursor.close()
+  
   SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
   
   class Base(DeclarativeBase):
@@ -644,19 +651,20 @@
          b. Cast amount to Decimal; positive → type='income', negative → type='expense'.
          c. Compute dedup_key:
             - If transaction_id_col present and non-null: f"{bank.id}:{row.transaction_id}"
-            - Else: hex(sha256(f"{bank.id}|{date}|{amount}|{description}".encode()))
+            - Else: hex(sha256(f"{bank.id}|{date}|{Decimal(amount).quantize(Decimal('0.01'))}|{description}".encode()))
          d. Collect as dict; record failed rows with row number and error message.
-      6. Create ImportBatch record; flush to get ID.
-      7. Bulk-insert transactions using:
+      6. If zero parseable rows: raise ValidationError(400) — no DB write has occurred.
+      7. Create ImportBatch record; flush to get ID.
+      8. Bulk-insert transactions using:
          INSERT OR IGNORE INTO transactions (...) VALUES (...)
          via SQLAlchemy core (not ORM) for performance.
-      8. Determine new vs duplicate count by comparing inserted row_count
+      9. Determine new vs duplicate count by comparing inserted row_count
          (session.execute result.rowcount) against total attempted.
-      9. Commit. Return ImportResult.
+      10. Commit. Return ImportResult.
       """
   
-  def _compute_dedup_key(bank_id: int, date: str, amount: str, description: str) -> str:
-      """Internal: SHA-256 fallback dedup key."""
+  def _compute_dedup_key(bank_id: int, date: str, amount: Decimal, description: str) -> str:
+      """Internal: SHA-256 fallback dedup key. Normalises amount to 2 d.p. before hashing."""
   
   def _normalize_column_ref(ref: str | int, df_columns: list[str]) -> str:
       """
@@ -826,9 +834,9 @@
          WHERE category_id IN (collected_ids + [category_id])
       3. DELETE FROM categories WHERE id IN (collected_ids + [category_id])
          (order: children before parents — sort by depth DESC or use DELETE with WHERE id IN subtree)
-      4. Call suggester.invalidate() to mark the ML cache stale before committing; if the
-         commit later fails the cache is unnecessarily cold but never stale-with-deleted-data.
-      5. db.commit() — DB and cache are now in sync: either both updated or both unchanged.
+      4. db.commit() — transaction committed; DB state is final.
+      5. Call suggester.invalidate() to mark the ML cache stale.
+         (If commit failed, an exception was raised before this line — cache stays valid.)
       Steps 1–3 execute in a single transaction; no orphaned mappings possible.
       """
   
@@ -916,7 +924,7 @@
       expenses: float,
   ) -> tuple[SankeyNode | None, SankeyLink | None]:
       """
-      If income > expenses: creates Proficit node; link from income side.
+      If income > expenses: creates Proficit node; link from EXPENSES node (source=EXPENSES_NODE_ID).
       If expenses > income: creates Deficit node; link from EXPENSES node.
       If equal: returns (None, None).
       """
@@ -1431,9 +1439,11 @@
     }],
     tooltip: {
       trigger: "item",
-      formatter: (params: any) => {
+      formatter: (params: { dataType: string; name: string; value: number; data: { source: string; target: string } }) => {
         if (params.dataType === "edge") {
-          return `${params.data.source} → ${params.data.target}: ${params.value}`;
+          const src = payload.nodes.find(n => n.id === params.data.source);
+          const tgt = payload.nodes.find(n => n.id === params.data.target);
+          return `${src?.name ?? params.data.source} → ${tgt?.name ?? params.data.target}: ${params.value}`;
         }
         const node = payload.nodes.find(n => n.id === params.name);
         return `${node?.name ?? params.name}: ${params.value}`;
@@ -1486,7 +1496,7 @@
   
   ---
   
-  ### 7.9 `DateRangePicker`
+  ### 7.10 `DateRangePicker`
   
   **File:** `src/components/shared/DateRangePicker.tsx`
   
@@ -1643,16 +1653,17 @@
   
   ```typescript
   interface UseSuggestionsReturn {
-    fetchSuggestions: UseMutationResult<SuggestionResult[], Error, number[]>;
     suggestions: Map<number, SuggestionResult>;  // keyed by transaction_id
+    isLoading: boolean;
+    refetch: () => void;
   }
   
-  export function useSuggestions(): UseSuggestionsReturn;
+  export function useSuggestions(transactionIds: number[]): UseSuggestionsReturn;
   ```
   
-  **Query key:** (mutation only; results stored in local component state via the mutation's `data` field, accessible as `suggestions` map)
+  **Query key:** `["suggestions", transactionIds]` — results are stored in TanStack Query cache.
   
-  **Note:** Suggestions are ephemeral — they are not cached in TanStack Query and are re-requested on demand (e.g., when the transaction table page loads with unmapped expenses). The hook accumulates results across multiple calls via a local `useState<Map>`.
+  **Note:** Uses `useQuery` (not a mutation) so that `queryClient.invalidateQueries(["suggestions"])` from `useMappings` takes effect and suggestion badges refresh after a mapping is assigned. `transactionIds` is sorted before inclusion in the key to ensure cache stability.
   
   ---
   
@@ -1724,12 +1735,19 @@
   }
   
   // Initial date range: first day of current month → today
+  function toLocalDateString(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  
   function getDefaultDateRange(): DateRange {
     const today = new Date();
     const from = new Date(today.getFullYear(), today.getMonth(), 1);
     return {
-      from: from.toISOString().slice(0, 10),
-      to: today.toISOString().slice(0, 10),
+      from: toLocalDateString(from),
+      to: toLocalDateString(today),
     };
   }
   
@@ -2460,7 +2478,11 @@
   
   @pytest.fixture(scope="function")
   def db_engine():
+      from sqlalchemy import event
       engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+      @event.listens_for(engine, "connect")
+      def set_sqlite_pragma(dbapi_connection, connection_record):
+          dbapi_connection.execute("PRAGMA foreign_keys=ON")
       Base.metadata.create_all(engine)
       yield engine
       Base.metadata.drop_all(engine)

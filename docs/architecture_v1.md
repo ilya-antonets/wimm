@@ -141,8 +141,6 @@ Five tables. The category tree uses an **adjacency list** — the simplest repre
 | id | INTEGER PK | |
 | transaction_id | INTEGER UNIQUE FK → transactions | Enforces one-category-per-expense constraint |
 | category_id | FK → categories | |
-| assigned_by | TEXT | `user` or `ml` |
-| ml_confidence | REAL NULLABLE | Confidence score from ML suggestion (0–1) |
 
 ### 4.2 Deduplication
 
