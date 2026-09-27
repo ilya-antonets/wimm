@@ -17,9 +17,9 @@ Stage 0 (CI + .gitignore)
     │
     ├── Stage 1 (BE: models, migrations, main.py skeleton)
     │       ├── Stage 2 (banks CRUD)
-    │       │       └── Stage 3 (CSV import) → Stage 6 (mappings + ML) → Stage 7 (Sankey)
+    │       │       ├── Stage 3 (CSV import) → Stage 6 (mappings + ML) → Stage 7 (Sankey)
+    │       │       └── Stage 5 (transactions) ────────────────────────────┘
     │       └── Stage 4 (categories) ──────────────┘
-    │               └── Stage 5 (transactions)
     │
     └── Stage 8 (FE: scaffold, types, store, layout)
             └── Stage 9 (settings: banks + import UI)
@@ -28,7 +28,7 @@ Stage 0 (CI + .gitignore)
                                     └── Stage 12 (Docker Compose)
 ```
 
-Backend stages 1–7 are strictly sequential (each adds routers/services to `main.py`). Frontend stages 8–11 are strictly sequential. Stage 12 depends on both tracks being complete.
+Backend stages 1–7 are strictly sequential within each path (Stage 5 requires both Stage 2 and Stage 4). Frontend stages 8–11 are strictly sequential. Stage 12 depends on both tracks being complete.
 
 ---
 
@@ -60,7 +60,7 @@ Backend stages 1–7 are strictly sequential (each adds routers/services to `mai
 - `.gitignore` — `*.db`, `/data/`, `/logs/`, `__pycache__/`, `.venv/`, `frontend/node_modules/`, `frontend/dist/`, `.mypy_cache/`, `.ruff_cache/`, `htmlcov/`
 - `.github/workflows/ci.yml` — two jobs gated on `hashFiles`; both skipped in this stage so PR is green
 - `scripts/check.sh` — runs all checks with `if [ -d backend ]` / `if [ -d frontend ]` guards
-- `README.md` — project description, developer quickstart stub, note to enable branch protection for `ci / backend` and `ci / frontend`
+- `README.md` — project description, developer quickstart stub, note to enable branch protection for `CI / backend` and `CI / frontend` (match the `name:` field in `.github/workflows/ci.yml` exactly — GitHub status check names are case-sensitive)
 
 ### CI job structure
 ```yaml
@@ -85,7 +85,7 @@ None — the CI workflow is the deliverable. Enable branch protection on `main` 
 ### Files created
 - `backend/requirements.txt` — fastapi 0.115, uvicorn[standard] 0.30.6, sqlalchemy 2.0.35, alembic 1.13.3, pydantic 2.9.2, pydantic-settings 2.5.2, pandas 2.2.3, scikit-learn 1.5.2, python-multipart 0.0.12, aiofiles 24.1.0
 - `backend/requirements-dev.txt` — mypy, ruff, pytest, pytest-cov, httpx, pytest-mock, factory-boy, types-aiofiles, pandas-stubs
-- `backend/pyproject.toml` — `[tool.mypy]` strict + pydantic plugin + `ignore_missing_imports` for sklearn/alembic; `[tool.ruff]` selecting E/W/F/I/UP/B/C4/SIM, line-length 100; `[tool.pytest.ini_options]` `addopts = "--cov=app --cov-fail-under=85"`
+- `backend/pyproject.toml` — `[tool.mypy]` strict + pydantic plugin + `ignore_missing_imports` for sklearn/alembic; `[tool.ruff]` selecting E/W/F/I/UP/B/C4/SIM, line-length 100; `[tool.pytest.ini_options]` `addopts = "--cov=app --cov-fail-under=85"`; add `[tool.coverage.report] exclude_lines` and a `[tool.pytest.ini_options] cov_context` or a `pytest-cov` ini `--cov-fail-under` split: use `--cov=app/services --cov-fail-under=90` in a separate `pytest -m services` run in CI, or configure `[tool.coverage.paths]` with per-package thresholds via `coverage.ini` `[report] fail_under`; minimum: CI must enforce ≥90% for `app/services/` separately from the global 85% threshold
 - `backend/alembic.ini`, `backend/alembic/env.py` (`render_as_batch=True`), `backend/alembic/script.py.mako`
 - `backend/alembic/versions/001_initial_schema.py` — creates all 5 tables with FK constraints, indices, `CheckConstraint("type IN ('income','expense')")`; seeds `(id=1, name='Uncategorized', parent_id=NULL, sort_order=0)`
 - `backend/app/config.py` — `Settings(BaseSettings)` with all env vars: `DATABASE_URL`, `SQL_ECHO`, `LOG_LEVEL`, `LOG_FORMAT`, `LOG_DIR`, `ML_*` params
@@ -133,7 +133,7 @@ MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns 
 
 ### Files created
 - `backend/app/schemas/imports.py` — `FailedRow`, `ImportResult`
-- `backend/app/services/csv_importer.py` — `import_csv(db, bank, file_content, filename) -> ImportResult`: decode bytes → `pandas.read_csv` (skiprows/skipfooter) → rename via column_map → per-row parse (date, amount, type, dedup_key) → create `ImportBatch` → bulk `INSERT OR IGNORE` → commit. `_compute_dedup_key`: uses `bank_id:external_id` if `column_map.transaction_id` set, else `hex(SHA-256(bank_id|date|amount_2dp|description))`
+- `backend/app/services/csv_importer.py` — `import_csv(db, bank, file_content, filename) -> ImportResult`: decode bytes → `pandas.read_csv` (skiprows/skipfooter, `engine='python'` — required for skipfooter) → rename via column_map → per-row parse (date, amount, type, dedup_key) → create `ImportBatch` → bulk `INSERT OR IGNORE` → commit. `_compute_dedup_key`: uses `bank_id:external_id` if `column_map.transaction_id` set, else `hex(SHA-256(bank_id|date|amount_2dp|description))`
 - `backend/app/services/ml_suggester.py` — `MLSuggester` with `threading.Lock`, `invalidate()`, stub `suggest()`, `get_suggester()` singleton with double-checked locking
 - `backend/app/routers/imports.py` — `POST /api/import` (multipart: `bank_id` int + `file` UploadFile, validates `.csv`, calls `import_csv`, calls `get_suggester().invalidate()`, returns 201/200/400)
 - `backend/tests/test_csv_importer.py`, `backend/tests/routers/test_imports.py`
@@ -143,7 +143,7 @@ MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns 
 
 ### Tests
 `test_csv_importer.py` (9 cases): basic import, dedup by hash, dedup by external ID, skip rows, income/expense sign detection, latin-1 encoding, invalid date format, missing required column  
-`test_imports.py` (4 cases): valid upload (201), duplicate upload (200), wrong bank ID (404), malformed CSV (400)
+`test_imports.py` (5 cases): valid upload (201), duplicate upload (200), wrong bank ID (404), malformed CSV (400), upload triggers ML cache invalidation (`get_suggester().invalidate()` called)
 
 ---
 
@@ -189,12 +189,12 @@ The `MLSuggester` stub from Stage 3 gains its full implementation.
 ### Files created
 - `backend/app/schemas/mappings.py` — `MappingCreate`, `MappingRead`
 - `backend/app/schemas/suggestions.py` — `SuggestionRequest` (`transaction_ids: list[int]` 1–200), `SuggestionResult` (transaction_id, suggested_category_id, suggested_category_name, confidence 0–1, method: "exact"|"tfidf")
-- `backend/app/routers/mappings.py` — `POST /api/mappings` (upsert: check existing → INSERT → catch IntegrityError; 400 income, 404 missing); `DELETE /api/mappings/{transaction_id}` (204/404); both `invalidate()`
+- `backend/app/routers/mappings.py` — `POST /api/mappings` (upsert: check existing → INSERT → catch IntegrityError → return 409 Conflict; 400 income, 404 missing); `DELETE /api/mappings/{transaction_id}` (204/404); both `invalidate()`
 - `backend/app/routers/suggestions.py` — `POST /api/suggestions` (200/400)
 - `backend/tests/test_ml_suggester.py`, `backend/tests/routers/test_mappings.py`, `backend/tests/routers/test_suggestions.py`
 
 ### Modified
-- `backend/app/services/ml_suggester.py` — implement `_rebuild_cache()` (double-checked locking, `TfidfVectorizer(analyzer='word', ngram_range=(min,max), max_features=5000, sublinear_tf=True)`, exact cache dict) and `suggest()` (Phase 1: normalize `upper().re.sub(r'[^A-Z ]','').strip()` → exact lookup → confidence 1.0; Phase 2: cosine similarity → top-k, all-agree boost `mean(scores)*1.2` capped 1.0)
+- `backend/app/services/ml_suggester.py` — implement `_rebuild_cache()` (double-checked locking, `TfidfVectorizer(analyzer='word', ngram_range=(min,max), max_features=5000, sublinear_tf=True)`, exact cache dict) and `suggest()` (Phase 1: normalize `upper().re.sub(r'[^A-Z ]','').strip()` → exact lookup → confidence 1.0; Phase 2: cosine similarity → top-k, all-agree boost `mean(scores)*1.2` capped 1.0; tie-break: top-1 argmax wins — `majority_category_id = category with highest cosine score`, `confidence = max_score`)
 - `backend/app/main.py` — register `mappings.router`, `suggestions.router`
 
 ### Tests
@@ -274,7 +274,7 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 - `frontend/src/hooks/useCategoryTree.ts` — query `["categories"]`; mutations createCategory, renameCategory, moveCategory, deleteCategory (deleteCategory also invalidates `["transactions"]` + `["sankey"]`)
 - `frontend/src/hooks/useTransactions.ts` — query `["transactions", filters]`; deleteTransaction invalidates `["transactions"]` + `["sankey"]`
 - `frontend/src/hooks/useMappings.ts` — createOrUpdateMapping, deleteMapping; both invalidate `["transactions"]` + `["sankey"]` + `["suggestions"]`
-- `frontend/src/hooks/useSuggestions.ts` — `useQuery` (not mutation), key `["suggestions", sortedTransactionIds]`, `enabled: transactionIds.length > 0`, returns `Map<number, SuggestionResult>`
+- `frontend/src/hooks/useSuggestions.ts` — `useMutation` (not useQuery — POST endpoint must not auto-refetch); call `mutateSuggestions(transactionIds)` explicitly; returns `Map<number, SuggestionResult>`
 - `frontend/src/components/categories/CategoryTree.tsx` — react-arborist; inline rename on double-click; context menu (Add child, Rename, Delete — disabled for id=1); `onMove` → `moveCategory`; flat list sorted by sort_order → tree transform
 - `frontend/src/components/categories/CategoryPanel.tsx` — sidebar, "New root category" button, reads/writes `store.activeCategoryId`
 - `frontend/src/components/transactions/TransactionTable.tsx` — TanStack Table v8; columns: date, description, amount (signed+currency), type badge, bank name, category dropdown (expense only), suggestion badge (unmapped: name + confidence% + Accept); pagination 25/50/100; filter bar (date range from store, type toggle, bank select, search, "Unmapped only"); "Clear mapping" per expense row
@@ -295,7 +295,7 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 - `frontend/src/services/sankeyService.ts`
 - `frontend/src/hooks/useSankeyData.ts` — query `["sankey", dateFrom, dateTo]`; `staleTime: 30_000`; `enabled: !!dateFrom && !!dateTo`
 - `frontend/src/components/sankey/SankeyDiagram.tsx` — `ReactECharts`; option: `type: "sankey"`, `layout: "none"`, `emphasis: {focus: "adjacency"}`; nodes use `id` as ECharts `name`, `label.formatter` for display name; node click → maps ECharts name back to `SankeyNode.id` → if `transaction_ids` present → `store.openSankeyPanel`; income/separator nodes ignored on click
-- `frontend/src/components/sankey/SankeyNodePanel.tsx` — slide-in panel; compact transaction list via `useTransactions({ids})`; per-row category dropdown; on reassign calls `createOrUpdateMapping` then invalidates `["sankey"]` and closes
+- `frontend/src/components/sankey/SankeyNodePanel.tsx` — slide-in panel; compact transaction list via `useTransactions({ids})`; `useTransactions` must fetch all pages when an `ids` list is supplied — loop `page=1,2,…` until `page * page_size >= total` and merge results before rendering; per-row category dropdown; on reassign calls `createOrUpdateMapping` then invalidates `["sankey"]` and closes
 - `frontend/src/pages/DashboardPage.tsx` — DateRangePicker + SankeyDiagram + SankeyNodePanel (visibility from store)
 
 ### Tests
@@ -315,7 +315,7 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 - `backend/.dockerignore`, `frontend/.dockerignore`
 
 ### Modified
-- `.github/workflows/ci.yml` — add `docker-build` job: `docker build ./backend --target production` + `docker build ./frontend`
+- `.github/workflows/ci.yml` — add `docker-build` job: `docker build ./backend` + `docker build ./frontend`
 - `README.md` — Docker Compose quickstart, dev-mode instructions, backup command, environment variable contract table
 
 ### Tests
