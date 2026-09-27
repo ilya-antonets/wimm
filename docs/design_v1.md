@@ -925,7 +925,7 @@
   ) -> tuple[SankeyNode | None, SankeyLink | None]:
       """
       If income > expenses: creates Proficit node; link from EXPENSES node (source=EXPENSES_NODE_ID).
-      If expenses > income: creates Deficit node; link from EXPENSES node.
+      If expenses > income: creates Deficit node; link from DEFICIT node (source=DEFICIT_NODE_ID, target=EXPENSES_NODE_ID).
       If equal: returns (None, None).
       """
   ```
@@ -1663,7 +1663,7 @@
   
   **Query key:** `["suggestions", transactionIds]` — results are stored in TanStack Query cache.
   
-  **Note:** Uses `useQuery` (not a mutation) so that `queryClient.invalidateQueries(["suggestions"])` from `useMappings` takes effect and suggestion badges refresh after a mapping is assigned. `transactionIds` is sorted before inclusion in the key to ensure cache stability.
+  **Note:** Uses `useQuery` (not a mutation) so that `queryClient.invalidateQueries(["suggestions"])` from `useMappings` takes effect and suggestion badges refresh after a mapping is assigned. `transactionIds` is sorted before inclusion in the key to ensure cache stability. The query must include `enabled: transactionIds.length > 0` to avoid firing POST /api/suggestions with an empty list (server enforces `min_length=1` and returns 422).
   
   ---
   
