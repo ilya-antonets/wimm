@@ -845,10 +845,10 @@
       1. Collect all descendant IDs via recursive CTE.
       2. UPDATE mappings SET category_id=UNCATEGORIZED_ID
          WHERE category_id IN (collected_ids + [category_id])
-      3. For cat_id in sorted(collected_ids + [category_id], key=depth, reverse=True):
+      3. For cat_id in _get_subtree_ids(db, category_id):  # already depth-ordered
            DELETE FROM categories WHERE id = cat_id
-         (individual deletes ordered deepest-first; a single WHERE-IN does not guarantee row order
-          and fails on RESTRICT FK when SQLite processes parents before children)
+         (_get_subtree_ids returns IDs depth-DESC so children are always deleted before parents,
+          satisfying the RESTRICT FK on parent_id)
       4. db.commit() — transaction committed; DB state is final.
       5. Call suggester.invalidate() to mark the ML cache stale.
          (If commit failed, an exception was raised before this line — cache stays valid.)
@@ -857,9 +857,16 @@
   
   def _get_subtree_ids(db: Session, root_id: int) -> list[int]:
       """
-      Executes recursive CTE to get all descendant IDs (including root_id).
-      Returns list[int].
+      Executes recursive CTE to get all descendant IDs (including root_id),
+      ordered deepest-first (depth DESC). Safe for per-row DELETE statements
+      where the RESTRICT FK on parent_id requires children to be removed
+      before their parents.
       """
+      # CTE: WITH RECURSIVE subtree(id, depth) AS (
+      #   SELECT id, 0 FROM categories WHERE id = :root_id
+      #   UNION ALL
+      #   SELECT c.id, s.depth+1 FROM categories c JOIN subtree s ON c.parent_id = s.id
+      # ) SELECT id FROM subtree ORDER BY depth DESC
   
   def _assert_no_cycle(db: Session, category_id: int, new_parent_id: int | None) -> None:
       """Raises ValueError if new_parent_id is within the subtree of category_id.
@@ -2028,7 +2035,11 @@
         value  = float(row.amount),
       ))
   
-    ── Step 3: Resolve category for each expense transaction ──────────────────
+    ── Step 3: Load category metadata ─────────────────────────────────────────
+    all_categories = SELECT id, name, parent_id FROM categories
+    cat_map: dict[int, Category] = {c.id: c for c in all_categories}
+  
+    ── Step 4: Resolve category for each expense transaction ──────────────────
     # First pass: split transactions in period into mapped vs unmapped.
   
     expense_rows = SELECT t.id, t.amount, m.category_id
@@ -2037,7 +2048,7 @@
                    WHERE t.type = 'expense'
                      AND t.date BETWEEN :date_from AND :date_to
   
-    expense_amounts: dict[tx_id → float] = {}         # tx_id → amount for Step 4
+    expense_amounts: dict[tx_id → float] = {}         # tx_id → amount for Step 5
     mapped_by_tx:   dict[tx_id → category_id] = {}   # explicit user mappings
     unmapped_ids:   list[int] = []
   
@@ -2051,7 +2062,7 @@
     # ML inference for unmapped transactions
     IF unmapped_ids:
       suggestions = suggester.suggest(db, unmapped_ids)
-      all_cat_ids = set(cat_map.keys())  # reuse cat_map loaded in Step 5 (moved before Step 3)
+      all_cat_ids = set(cat_map.keys())  # cat_map loaded in Step 3 above
       FOR s IN suggestions:
         IF s.confidence >= settings.ml_min_confidence AND s.suggested_category_id IN all_cat_ids:
           mapped_by_tx[s.transaction_id] = s.suggested_category_id
@@ -2061,12 +2072,6 @@
       FOR tx_id IN unmapped_ids:
         IF tx_id NOT IN mapped_by_tx:
           mapped_by_tx[tx_id] = UNCATEGORIZED_ID
-  
-    ── Step 4: Load category metadata (moved before ML inference) ─────────────
-    all_categories = SELECT id, name, parent_id FROM categories
-    cat_map: dict[int, Category] = {c.id: c for c in all_categories}
-    # cat_map is also used in Step 3's ML inference guard (all_cat_ids = set(cat_map.keys()))
-    # to avoid a second DB round-trip.
   
     ── Step 5: Aggregate totals per category ───────────────────────────────────
     # Compute: category_id → sum of expense amounts from mapped_by_tx
@@ -2169,10 +2174,10 @@
     balance_link = None
   
     IF balance > 0:
-      # Income exceeds expenses → Proficit on income side.
-      # depth=0 forces ECharts to render this node in the income (leftmost) column
-      # even though the link flows from EXPENSES.
-      balance_node = SankeyNode(id=PROFICIT_NODE_ID, name="Proficit", depth=0)
+      # Income exceeds expenses → Proficit is a right-side sink (expense column).
+      # EXPENSES → PROFICIT is a forward left-to-right edge; ECharts renders it reliably.
+      # depth hint omitted: ECharts places Proficit at depth=2 naturally.
+      balance_node = SankeyNode(id=PROFICIT_NODE_ID, name="Proficit")
       balance_link = SankeyLink(
         source = EXPENSES_NODE_ID,
         target = PROFICIT_NODE_ID,
@@ -2180,10 +2185,11 @@
       )
   
     ELIF balance < 0:
-      # Expenses exceed income → Deficit on expense side.
-      # depth=2 forces ECharts to render this node in the expense category column
-      # even though the link flows toward EXPENSES (depth=1).
-      balance_node = SankeyNode(id=DEFICIT_NODE_ID, name="Deficit", depth=2)
+      # Expenses exceed income → Deficit is a left-side source (income column).
+      # DEFICIT → EXPENSES is a forward left-to-right edge; ECharts renders it reliably.
+      # depth=2 was removed: it created a backward edge (depth 2→1) that ECharts
+      # does not guarantee to render; ECharts places Deficit at depth=0 naturally.
+      balance_node = SankeyNode(id=DEFICIT_NODE_ID, name="Deficit")
       # Add a synthetic income link for the deficit amount
       # so that EXPENSES node receives enough flow to distribute.
       balance_link = SankeyLink(
@@ -2646,8 +2652,8 @@
   |---|---|
   | `test_income_nodes_one_per_transaction` | 3 income txns → 3 income nodes in result |
   | `test_expense_nodes_per_category` | 2 expense categories → 2 expense nodes + "Expenses" separator |
-  | `test_proficit_when_income_exceeds_expenses` | Income 1000, expenses 800 → "Proficit" node on income side, value=200 |
-  | `test_deficit_when_expenses_exceed_income` | Income 800, expenses 1000 → "Deficit" node on expense side, value=200 |
+  | `test_proficit_when_income_exceeds_expenses` | Income 1000, expenses 800 → "Proficit" node on expense side (right), value=200 |
+  | `test_deficit_when_expenses_exceed_income` | Income 800, expenses 1000 → "Deficit" node on income side (left), value=200 |
   | `test_balanced_no_extra_node` | Income exactly equals expenses → no Proficit or Deficit node |
   | `test_empty_period_returns_empty_payload` | No transactions in period → `{"nodes": [], "links": []}` |
   | `test_unmapped_expense_falls_back_to_ml` | Expense with no mapping → ML is called → expense appears under ML-suggested category node |
