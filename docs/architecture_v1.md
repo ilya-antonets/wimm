@@ -195,10 +195,23 @@ Produces an empty script the developer fills in manually. DDL and DML can be mix
 def upgrade():
     op.add_column("transactions", sa.Column("dedup_key", sa.Text()))
     conn = op.get_bind()
-    # backfill for existing rows
-    conn.execute(sa.text(
-        "UPDATE transactions SET dedup_key = lower(hex(randomblob(16))) WHERE dedup_key IS NULL"
-    ))
+    # Backfill using the real SHA-256 formula so re-importing the same CSV
+    # after migration does not create duplicate rows.
+    # SQLite has no built-in SHA-256, so we compute in Python and batch-update.
+    import hashlib
+    from decimal import Decimal
+    rows = conn.execute(sa.text(
+        "SELECT id, bank_id, date, amount, description FROM transactions WHERE dedup_key IS NULL"
+    )).fetchall()
+    for row in rows:
+        amount_norm = str(Decimal(str(row.amount)).quantize(Decimal("0.01")))
+        key = hashlib.sha256(
+            f"{row.bank_id}|{row.date}|{amount_norm}|{row.description}".encode()
+        ).hexdigest()
+        conn.execute(
+            sa.text("UPDATE transactions SET dedup_key = :key WHERE id = :id"),
+            {"key": key, "id": row.id},
+        )
     op.alter_column("transactions", "dedup_key", nullable=False)
     op.create_unique_constraint("uq_transactions_dedup_key", "transactions", ["dedup_key"])
 ```

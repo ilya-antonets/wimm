@@ -138,7 +138,7 @@
       db = SessionLocal()
       try:
           yield db
-      except:
+      except Exception:
           db.rollback()
           raise
       finally:
@@ -360,8 +360,9 @@
   
   class CategoryUpdate(BaseModel):
       name: str | None = Field(None, min_length=1, max_length=120)
-      parent_id: int | None = None   # None means "do not change parent"
       sort_order: int | None = None
+      # parent_id is intentionally absent — reparenting uses PATCH /move.
+      # Including it here and silently ignoring it would mislead API consumers.
   
   class CategoryRead(BaseModel):
       id: int
@@ -371,7 +372,7 @@
       model_config = ConfigDict(from_attributes=True)
   ```
   
-  **Note:** The `parent_id` field in `CategoryUpdate` uses a sentinel pattern — to actually set `parent_id` to null (move to root), use `PATCH /api/categories/{id}/move` (see below). A plain `PUT` with `parent_id=None` means "leave parent unchanged."
+  **Note:** `CategoryUpdate` does not include `parent_id`. To reparent a category (including moving to root), use `PATCH /api/categories/{id}/move`.
   
   #### `POST /api/categories`
   
@@ -384,7 +385,7 @@
   
   Rename or update sort order. Cannot change parent via this endpoint.
   
-  - **Request body:** `CategoryUpdate` — only `name` and `sort_order` are honoured here; `parent_id` is ignored.
+  - **Request body:** `CategoryUpdate` — updates `name` and/or `sort_order`. Use `PATCH /move` to reparent.
   - **Response 200:** `CategoryRead`
   - **Error 404:** Category not found.
   - **Error 403:** Attempt to rename `id=1` ("Uncategorized") is rejected.
@@ -416,7 +417,7 @@
   
     1. **Find the full subtree.** Collect `category_id` plus all its descendants via recursive CTE (any depth). A leaf node has no descendants.
     2. **Reassign mappings.** `UPDATE mappings SET category_id = 1 WHERE category_id IN <subtree_ids>`. Transactions are **not deleted** — they remain in the DB and appear under "Uncategorized" in the Sankey diagram after deletion.
-    3. **Delete category rows.** `DELETE FROM categories WHERE id IN <subtree_ids>`, deepest nodes first (children before parents). This order is required because `categories.parent_id` has `ondelete=RESTRICT` — SQLite will refuse to delete a parent while a child still references it.
+    3. **Delete category rows.** Issue individual `DELETE FROM categories WHERE id = ?` statements, iterating `subtree_ids` sorted by depth descending (deepest nodes first). A single `WHERE id IN (...)` is insufficient because SQLite processes rows in rowid order, which is typically parent-before-child; the `RESTRICT` FK on `parent_id` would raise `SQLITE_CONSTRAINT` before all children are removed.
   
   **Why `RESTRICT` and not `CASCADE` on the FK?**
   The explicit reassign-then-delete sequence in the service layer is intentional. `ondelete=CASCADE` on `mappings.category_id` would silently delete all mappings when a category is removed, causing transactions to become completely unmapped (invisible in the Sankey). `RESTRICT` makes the DB enforce that the service reassigns mappings first — an accidental direct `DELETE FROM categories` without the reassign step will raise a DB error rather than silently destroying user data.
@@ -719,11 +720,14 @@
           self._cache_valid: bool = False
           self._lock = threading.Lock()
   
-      def invalidate(self) -> None:
+      def invalidate(self, reason: str = "unspecified") -> None:
           """
           Called after any manual mapping is created or deleted.
-          Sets _cache_valid=False; next suggestion request triggers re-fit.
+          Acquires _lock before setting _cache_valid=False so concurrent
+          _rebuild_cache calls cannot overwrite the invalidation.
           """
+          with self._lock:
+              self._cache_valid = False
   
       def suggest(
           self,
@@ -841,8 +845,10 @@
       1. Collect all descendant IDs via recursive CTE.
       2. UPDATE mappings SET category_id=UNCATEGORIZED_ID
          WHERE category_id IN (collected_ids + [category_id])
-      3. DELETE FROM categories WHERE id IN (collected_ids + [category_id])
-         (order: children before parents — sort by depth DESC or use DELETE with WHERE id IN subtree)
+      3. For cat_id in sorted(collected_ids + [category_id], key=depth, reverse=True):
+           DELETE FROM categories WHERE id = cat_id
+         (individual deletes ordered deepest-first; a single WHERE-IN does not guarantee row order
+          and fails on RESTRICT FK when SQLite processes parents before children)
       4. db.commit() — transaction committed; DB state is final.
       5. Call suggester.invalidate() to mark the ML cache stale.
          (If commit failed, an exception was raised before this line — cache stays valid.)
@@ -2045,7 +2051,7 @@
     # ML inference for unmapped transactions
     IF unmapped_ids:
       suggestions = suggester.suggest(db, unmapped_ids)
-      all_cat_ids = {c.id for c in db.query(Category.id).all()}
+      all_cat_ids = set(cat_map.keys())  # reuse cat_map loaded in Step 5 (moved before Step 3)
       FOR s IN suggestions:
         IF s.confidence >= settings.ml_min_confidence AND s.suggested_category_id IN all_cat_ids:
           mapped_by_tx[s.transaction_id] = s.suggested_category_id
@@ -2056,19 +2062,19 @@
         IF tx_id NOT IN mapped_by_tx:
           mapped_by_tx[tx_id] = UNCATEGORIZED_ID
   
-    ── Step 4: Aggregate totals per category ──────────────────────────────────
+    ── Step 4: Load category metadata (moved before ML inference) ─────────────
+    all_categories = SELECT id, name, parent_id FROM categories
+    cat_map: dict[int, Category] = {c.id: c for c in all_categories}
+    # cat_map is also used in Step 3's ML inference guard (all_cat_ids = set(cat_map.keys()))
+    # to avoid a second DB round-trip.
+  
+    ── Step 5: Aggregate totals per category ───────────────────────────────────
     # Compute: category_id → sum of expense amounts from mapped_by_tx
     # Use the amounts from expense_rows dict keyed by tx_id.
   
     raw_totals: dict[int, float] = defaultdict(float)
     FOR tx_id, cat_id IN mapped_by_tx.items():
       raw_totals[cat_id] += ABS(expense_amounts[tx_id])
-  
-    ── Step 5: Load category metadata ─────────────────────────────────────────
-    all_categories = SELECT id, name, parent_id FROM categories
-  
-    # Build lookup: id → Category
-    cat_map: dict[int, Category] = {c.id: c for c in all_categories}
   
     ── Step 6: Determine visible node set ─────────────────────────────────────
     # A category node is visible if it or any descendant has expenses in period.
@@ -2103,6 +2109,15 @@
         tx_ids_by_cat[current.parent_id].append(tx_id)
         current = cat_map[current.parent_id]
   
+    # direct_tx_ids_by_cat holds ONLY transactions mapped directly to this category
+    # (not inherited from descendants). Used to detect non-leaf nodes with own transactions.
+    direct_tx_ids_by_cat: dict[int, list[int]] = defaultdict(list)
+    FOR tx_id, cat_id IN mapped_by_tx.items():
+      direct_tx_ids_by_cat[cat_id].append(tx_id)
+  
+    # A category node has children if any other visible node references it as parent.
+    nodes_with_children = {cat_map[c].parent_id for c in visible_ids if cat_map[c].parent_id in visible_ids}
+  
     expense_nodes = [SankeyNode(id=EXPENSES_NODE_ID, name="Expenses")]
   
     FOR cat_id IN visible_ids:
@@ -2112,6 +2127,14 @@
         name            = cat.name,
         transaction_ids = tx_ids_by_cat.get(cat_id),   # enables drill-down panel
       ))
+      # If this branch node also has directly-mapped transactions, emit a synthetic
+      # child node so the Sankey stays balanced (inflow = outflow for every node).
+      IF cat_id IN nodes_with_children AND direct_tx_ids_by_cat.get(cat_id):
+        expense_nodes.append(SankeyNode(
+          id              = f"cat_{cat_id}_direct",
+          name            = f"{cat.name} (direct)",
+          transaction_ids = direct_tx_ids_by_cat[cat_id],
+        ))
   
     ── Step 8: Build expense links ────────────────────────────────────────────
     expense_links = []
@@ -2131,6 +2154,14 @@
         target = f"cat_{cat_id}",
         value  = node_totals[cat_id],
       ))
+      # Emit a link for any directly-mapped transactions on a branch node.
+      # Without this the branch node inflow > outflow, breaking ECharts.
+      IF cat_id IN nodes_with_children AND raw_totals.get(cat_id, 0) > 0:
+        expense_links.append(SankeyLink(
+          source = f"cat_{cat_id}",
+          target = f"cat_{cat_id}_direct",
+          value  = raw_totals[cat_id],
+        ))
   
     ── Step 9: Balance node ────────────────────────────────────────────────────
     balance = total_income - total_expenses
@@ -2525,10 +2556,12 @@
           yield
       original_lifespan = app.router.lifespan_context
       app.router.lifespan_context = noop_lifespan
-      with TestClient(app) as c:
-          yield c
-      del app.dependency_overrides[get_db]
-      app.router.lifespan_context = original_lifespan
+      try:
+          with TestClient(app) as c:
+              yield c
+      finally:
+          del app.dependency_overrides[get_db]
+          app.router.lifespan_context = original_lifespan
   ```
   
   **`tests/factories.py`**
@@ -2645,8 +2678,8 @@
   
   | Test | What it verifies |
   |---|---|
-  | `test_upload_valid_csv` | 201 response; `new_count` > 0 |
-  | `test_upload_duplicate_csv` | 200 response; `new_count=0`, `duplicate_count` > 0 |
+  | `test_upload_valid_csv` | 201 response; `new_transactions` > 0 |
+  | `test_upload_duplicate_csv` | 200 response; `new_transactions=0`, `duplicate_transactions` > 0 |
   | `test_upload_wrong_bank_id` | 404 when bank_id not found |
   | `test_upload_malformed_csv` | 422 with error detail |
   | `test_upload_triggers_suggestions` | After import, newly created expenses have ML suggestions available via POST /api/suggestions |
@@ -2813,7 +2846,7 @@
   | Hook test | Cases |
   |---|---|
   | `useBanks.test.ts` | Loads banks list; `createBank` adds to cache; `deleteBank` removes from cache |
-  | `useImport.test.ts` | `importCsv` returns `{ new_count, duplicate_count }`; on success invalidates `["transactions"]` and `["sankey"]` |
+  | `useImport.test.ts` | `importCsv` returns `{ new_transactions, duplicate_transactions }`; on success invalidates `["transactions"]` and `["sankey"]` |
   | `useCategoryTree.test.ts` | Returns nested tree; `renameCategory` updates cache optimistically; `deleteCategory` removes node from tree |
   | `useMappings.test.ts` | `assignMapping` posts mapping; invalidates `["transactions"]` and `["sankey"]` |
   | `useSuggestions.test.ts` | Returns suggestions per transaction_id; stale after mapping assigned |
