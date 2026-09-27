@@ -90,9 +90,10 @@
           sys.executable, "-m", "alembic", "upgrade", "head",
           stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
       )
-      _, stderr = await proc.communicate()
+      stdout, stderr = await proc.communicate()
       if proc.returncode != 0:
-          raise RuntimeError(f"Alembic migration failed:\n{stderr.decode()}")
+          output = (stdout.decode() + "\n" + stderr.decode()).strip()
+          raise RuntimeError(f"Alembic migration failed:\n{output}")
       yield
   
   app = FastAPI(title="WIMM API", version="1.0.0", lifespan=lifespan)
@@ -842,12 +843,12 @@
       """
       Preconditions: category_id != UNCATEGORIZED_ID.
       Algorithm:
-      1. Collect all descendant IDs via recursive CTE.
+      1. subtree_ids = _get_subtree_ids(db, category_id)  # root + all descendants, depth-ordered
       2. UPDATE mappings SET category_id=UNCATEGORIZED_ID
-         WHERE category_id IN (collected_ids + [category_id])
-      3. For cat_id in _get_subtree_ids(db, category_id):  # already depth-ordered
+         WHERE category_id IN subtree_ids
+      3. For cat_id in subtree_ids:
            DELETE FROM categories WHERE id = cat_id
-         (_get_subtree_ids returns IDs depth-DESC so children are always deleted before parents,
+         (_get_subtree_ids already returns IDs depth-DESC so children are deleted before parents,
           satisfying the RESTRICT FK on parent_id)
       4. db.commit() — transaction committed; DB state is final.
       5. Call suggester.invalidate() to mark the ML cache stale.
