@@ -54,6 +54,7 @@ Backend stages 1–7 are strictly sequential within each path (Stage 5 requires 
 ---
 
 ## Stage 0 — Repo Housekeeping + CI Pipeline
+**Status: COMPLETED**  
 **PR:** `chore: add GitHub Actions CI workflow and repository scaffolding`
 
 ### Files created
