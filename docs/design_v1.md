@@ -262,7 +262,8 @@
   - **Form fields:**
     - `bank_id: int` (required)
     - `file: UploadFile` — CSV file (content-type checked; reject if not `text/csv` or `.csv` extension)
-  - **Response 200:** `ImportResult`
+  - **Response 201:** `ImportResult` — at least one new transaction inserted (`new_transactions > 0`)
+- **Response 200:** `ImportResult` — all rows already existed (`new_transactions = 0`)
   
   ```python
   # schemas/imports.py
@@ -438,17 +439,26 @@
   
   **Upsert logic (router implementation):**
   ```python
+  from sqlalchemy.exc import IntegrityError
+  
   existing = db.query(Mapping).filter_by(transaction_id=body.transaction_id).first()
   if existing:
       existing.category_id = body.category_id
       db.commit()
       return Response(status_code=200, content=MappingRead.model_validate(existing, from_attributes=True).model_dump_json())
-  else:
+  try:
       mapping = Mapping(transaction_id=body.transaction_id, category_id=body.category_id)
       db.add(mapping); db.commit(); db.refresh(mapping)
       return Response(status_code=201, content=MappingRead.model_validate(mapping, from_attributes=True).model_dump_json())
+  except IntegrityError:
+      db.rollback()
+      # Concurrent request inserted first — update instead
+      existing = db.query(Mapping).filter_by(transaction_id=body.transaction_id).first()
+      existing.category_id = body.category_id
+      db.commit()
+      return Response(status_code=200, content=MappingRead.model_validate(existing, from_attributes=True).model_dump_json())
   ```
-  The `UNIQUE` constraint on `mappings.transaction_id` is a safety net, not the upsert mechanism — the explicit check-then-update pattern avoids a REPLACE overwriting the PK and is cleaner for returning correct HTTP codes.
+  The `UNIQUE` constraint on `mappings.transaction_id` is the upsert safety net. The initial `filter_by` check returns the correct HTTP code in the common case; the `except IntegrityError` branch handles the race where two concurrent requests both pass the initial check simultaneously.
   
   - **Request body:**
   
@@ -1030,6 +1040,10 @@
           uselist=False,
           cascade="all, delete-orphan",
       )
+  
+      @property
+      def bank_name(self) -> str:
+          return self.bank.name  # requires bank relationship to be loaded (use joinedload in router)
   
       __table_args__ = (
           CheckConstraint("type IN ('income', 'expense')", name="ck_transactions_type"),
@@ -1666,7 +1680,7 @@
   
   **Mutations and invalidation:**
   - `createOrUpdateMapping` → invalidates `["transactions"]`, `["sankey"]`, **and `["suggestions"]`** (so the suggestion badges for still-unmapped transactions refresh with the updated model).
-  - `deleteMapping` → invalidates `["transactions"]`, `["sankey"]`
+  - `deleteMapping` → invalidates `["transactions"]`, `["sankey"]`, **and `["suggestions"]`** (so suggestion badges re-appear for the now-unmapped transaction).
   
   ---
   
@@ -2002,7 +2016,7 @@
   - Decode failure (wrong encoding) → `ValidationError(400)` before any DB write.
   - Missing required columns → `ValidationError(400)` before any DB write.
   - Zero parseable rows (all failed) → `ValidationError(400)`.
-  - Partial failures (some rows bad): insert what succeeded, accumulate `failed_rows` in `ImportResult`, return `200`.
+  - Partial failures (some rows bad): insert what succeeded, accumulate `failed_rows` in `ImportResult`; return `201` if any new transactions were inserted, `200` if all inserted rows were duplicates.
   
   ---
   
@@ -2102,6 +2116,16 @@
         current = parent
   
     total_expenses = sum(raw_totals.values())
+  
+    # Early return: nothing to render for this period
+    IF NOT income_nodes AND NOT visible_ids:
+      RETURN SankeyPayload(
+        nodes          = [],
+        links          = [],
+        period_income  = total_income,
+        period_expenses = total_expenses,
+        balance        = total_income - total_expenses,
+      )
   
     ── Step 7: Build expense category nodes ───────────────────────────────────
     # Build reverse index: category_id → list of transaction IDs assigned to it
@@ -3398,6 +3422,11 @@
       })
   
   
+  # Instance-level fields on every LogRecord — used to skip standard attrs when merging extras.
+  # Built from a sentinel instance so it covers all fields set in LogRecord.__init__.
+  _STD_LOG_FIELDS = frozenset(vars(logging.LogRecord("", 0, "", 0, "", (), None)))
+  
+  
   class JsonFormatter(logging.Formatter):
       """Emit each log record as a single JSON line."""
   
@@ -3414,7 +3443,7 @@
               payload["exc"] = tb.format_exception(*record.exc_info)
           # Merge any extra fields passed via logger.info("...", extra={...})
           for key, val in record.__dict__.items():
-              if key not in logging.LogRecord.__dict__ and not key.startswith("_"):
+              if key not in _STD_LOG_FIELDS and not key.startswith("_"):
                   payload[key] = val
           return json.dumps(payload, default=str)
   ```

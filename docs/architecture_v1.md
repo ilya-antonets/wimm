@@ -118,7 +118,7 @@ Five tables. The category tree uses an **adjacency list** — the simplest repre
 |---|---|---|
 | id | INTEGER PK | |
 | bank_id | FK → banks | |
-| import_batch_id | FK → import_batches NULLABLE | Last batch that introduced this row |
+| import_batch_id | FK → import_batches NULLABLE | First (and only) batch that introduced this row — `INSERT OR IGNORE` never updates existing rows |
 | date | DATE | |
 | amount | NUMERIC(12,4) | Signed: positive = income, negative = expense |
 | description | TEXT | Raw payee/description from bank statement |
@@ -149,7 +149,7 @@ Idempotent import is enforced at the transaction level via `dedup_key`, not at t
 - If the bank exports a unique transaction ID (configured in `banks.column_map`):
   `dedup_key = "{bank_id}:{external_transaction_id}"`
 - Otherwise:
-  `dedup_key = hex(SHA-256(bank_id || date || Decimal(amount).quantize(Decimal("0.01")) || description))`
+  `dedup_key = hex(SHA-256(f"{bank_id}|{date}|{Decimal(amount).quantize(Decimal('0.01'))}|{description}".encode()))`
 
 On import, each row is inserted with `INSERT OR IGNORE`. Overlapping date ranges and re-uploaded files are handled silently. The user receives a summary: _"12 new transactions imported, 8 already existed."_
 
