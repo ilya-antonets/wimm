@@ -269,7 +269,7 @@ The Sankey diagram is assembled server-side and delivered to the frontend as a r
 - One node per income transaction (as specified in requirements; grouping deferred to a future version)
 - One separator node representing total expenses
 - One node per leaf and branch category that has at least one mapped transaction in the period
-- A **Proficit** node on the income side (if total income exceeds total expenses) or a **Deficit** node on the expense side (if expenses exceed income) to balance the diagram
+- A **Proficit** node on the income side (if total income exceeds total expenses) or a **Deficit** node on the expense side (if expenses exceed income) to balance the diagram. Both use the `depth` field on `SankeyNode` to enforce visual column placement — Proficit at depth 0 (income column), Deficit at depth 2 (expense category column).
 
 ---
 

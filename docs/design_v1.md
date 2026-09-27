@@ -85,8 +85,14 @@
   @asynccontextmanager
   async def lifespan(app: FastAPI):
       # Run Alembic migrations on startup
-      import subprocess, sys
-      subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], check=True)
+      import asyncio, sys
+      proc = await asyncio.create_subprocess_exec(
+          sys.executable, "-m", "alembic", "upgrade", "head",
+          stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+      )
+      _, stderr = await proc.communicate()
+      if proc.returncode != 0:
+          raise RuntimeError(f"Alembic migration failed:\n{stderr.decode()}")
       yield
   
   app = FastAPI(title="WIMM API", version="1.0.0", lifespan=lifespan)
@@ -132,6 +138,9 @@
       db = SessionLocal()
       try:
           yield db
+      except:
+          db.rollback()
+          raise
       finally:
           db.close()
   ```
@@ -189,10 +198,10 @@
   # schemas/banks.py
   
   class ColumnMap(BaseModel):
-      date: str           # CSV column name or 0-based index (str or int)
-      amount: str
-      description: str
-      transaction_id: str | None = None  # bank-provided external ID column
+      date: str | int     # CSV column name or 0-based integer index
+      amount: str | int
+      description: str | int
+      transaction_id: str | int | None = None  # bank-provided external ID column
   
   class BankCreate(BaseModel):
       name: str = Field(..., min_length=1, max_length=120)
@@ -239,7 +248,7 @@
   
   - **Response 204:** No content.
   - **Error 404:** Bank not found.
-  - **Error 409:** Bank has existing transactions. Deletion is blocked; transactions must be deleted first or bank must be anonymized.
+  - **Error 409:** Bank has existing transactions or import batches. Deletion is blocked; transactions must be deleted first or bank must be anonymized. The service must check both `transactions` and `import_batches` tables (both carry `ondelete=RESTRICT` FKs) and return 409 if either is non-empty.
   
   ---
   
@@ -295,7 +304,7 @@
   | `search` | `str` | none | Case-insensitive substring on `description` |
   | `ids` | `str` | none | Comma-separated list of transaction IDs; when present, returns exactly those transactions (ignores other filters except `page`/`page_size`). Used by `SankeyNodePanel` to load the drill-down expense list. |
   | `page` | `int` | 1 | 1-indexed |
-  | `page_size` | `int` | 50 | Max 200 |
+  | `page_size` | `int` | 50 | Min 1, max 200. FastAPI router must declare `ge=1, le=200` to prevent ZeroDivisionError in `pages = ceil(total / page_size)`. |
   
   - **Response 200:** `TransactionPage`
   
@@ -2084,9 +2093,15 @@
   
     ── Step 7: Build expense category nodes ───────────────────────────────────
     # Build reverse index: category_id → list of transaction IDs assigned to it
+    # Walk up the tree so parent nodes include all descendant transactions,
+    # enabling drill-down panel on non-leaf category nodes.
     tx_ids_by_cat: dict[int, list[int]] = defaultdict(list)
     FOR tx_id, cat_id IN mapped_by_tx.items():
       tx_ids_by_cat[cat_id].append(tx_id)
+      current = cat_map[cat_id]
+      WHILE current.parent_id IS NOT NULL:
+        tx_ids_by_cat[current.parent_id].append(tx_id)
+        current = cat_map[current.parent_id]
   
     expense_nodes = [SankeyNode(id=EXPENSES_NODE_ID, name="Expenses")]
   
@@ -2123,8 +2138,10 @@
     balance_link = None
   
     IF balance > 0:
-      # Income exceeds expenses → Proficit on income side
-      balance_node = SankeyNode(id=PROFICIT_NODE_ID, name="Proficit")
+      # Income exceeds expenses → Proficit on income side.
+      # depth=0 forces ECharts to render this node in the income (leftmost) column
+      # even though the link flows from EXPENSES.
+      balance_node = SankeyNode(id=PROFICIT_NODE_ID, name="Proficit", depth=0)
       balance_link = SankeyLink(
         source = EXPENSES_NODE_ID,
         target = PROFICIT_NODE_ID,
@@ -2132,11 +2149,12 @@
       )
   
     ELIF balance < 0:
-      # Expenses exceed income → Deficit on expense side
-      balance_node = SankeyNode(id=DEFICIT_NODE_ID, name="Deficit")
+      # Expenses exceed income → Deficit on expense side.
+      # depth=2 forces ECharts to render this node in the expense category column
+      # even though the link flows toward EXPENSES (depth=1).
+      balance_node = SankeyNode(id=DEFICIT_NODE_ID, name="Deficit", depth=2)
       # Add a synthetic income link for the deficit amount
       # so that EXPENSES node receives enough flow to distribute.
-      # The deficit appears as an income-side source.
       balance_link = SankeyLink(
         source = DEFICIT_NODE_ID,
         target = EXPENSES_NODE_ID,
