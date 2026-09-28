@@ -55,25 +55,28 @@ Backend stages 1–7 are strictly sequential within each path (Stage 5 requires 
 
 ## Stage 0 — Repo Housekeeping + CI Pipeline
 **Status: COMPLETED**  
-**PR:** `chore: add GitHub Actions CI workflow and repository scaffolding`
+**PR:** #3 — `chore: add GitHub Actions CI workflow and repository scaffolding` (+ three follow-up fix commits)
 
 ### Files created
-- `.gitignore` — `*.db`, `/data/`, `/logs/`, `__pycache__/`, `.venv/`, `frontend/node_modules/`, `frontend/dist/`, `.mypy_cache/`, `.ruff_cache/`, `htmlcov/`
-- `.github/workflows/ci.yml` — two jobs gated on `hashFiles`; both skipped in this stage so PR is green
-- `scripts/check.sh` — runs all checks with `if [ -d backend ]` / `if [ -d frontend ]` guards
+- `.gitignore` — `*.db`, `/data/`, `/logs/`, `__pycache__/`, `.venv/`, `frontend/node_modules/`, `frontend/dist/`, `.mypy_cache/`, `.ruff_cache/`, `htmlcov/`, `.env`, `.env.*`
+- `.github/workflows/ci.yml` — two jobs, both always run; install steps gated on `hashFiles`; actions pinned to immutable commit SHAs
+- `scripts/check.sh` — `cd "$(dirname "$0")/.."` at entry (safe from any cwd); frontend checks run in a subshell `(cd frontend && ...)`; accepts optional arg `backend|frontend|all`; CI delegates to it
 - `README.md` — project description, developer quickstart stub, note to enable branch protection for `CI / backend` and `CI / frontend` (match the `name:` field in `.github/workflows/ci.yml` exactly — GitHub status check names are case-sensitive)
 
 ### CI job structure
 ```yaml
 backend:
-  if: ${{ hashFiles('backend/requirements.txt') != '' }}
-  steps: [checkout, setup-python 3.12, pip install requirements + requirements-dev,
-          ruff check, ruff format --check, mypy, pytest --tb=short]
+  # no job-level if — both jobs always run; GitHub marks all-skipped as failure
+  steps: [checkout (SHA-pinned), setup-python 3.12,
+          Install dependencies (if: hashFiles(requirements.txt) != '' && hashFiles(requirements-dev.txt) != ''),
+          bash scripts/check.sh backend]
 frontend:
-  if: ${{ hashFiles('frontend/package.json') != '' }}
-  steps: [checkout, setup-node 20, npm ci, npm run lint,
-          npm run typecheck, npm run format:check, npm test -- --run]
+  steps: [checkout (SHA-pinned), setup-node 20,
+          Install dependencies (if: hashFiles(frontend/package.json) != ''),
+          bash scripts/check.sh frontend]
 ```
+Note: `cache: "pip"` omitted — `setup-python` errors when no requirements files exist.
+Re-add in Stage 1 alongside `requirements.txt` / `requirements-dev.txt`.
 
 ### Tests
 None — the CI workflow is the deliverable. Enable branch protection on `main` requiring both status checks.
@@ -101,6 +104,18 @@ None — the CI workflow is the deliverable. Enable branch protection on `main` 
 ### Tests (`backend/tests/test_health.py`)
 - `test_health_returns_200` — `GET /api/health` → 200, `{"status": "ok"}`
 - `test_db_fixture_seeds_uncategorized` — `db.execute("SELECT COUNT(*) FROM categories WHERE id=1")` = 1
+
+### Modified
+- `.github/workflows/ci.yml` — re-add `cache: "pip"` to the backend job's `setup-python` step (was deferred from Stage 0 because the action errors when no requirements files exist):
+  ```yaml
+  - uses: actions/setup-python@<sha> # v5
+    with:
+      python-version: "3.12"
+      cache: "pip"
+      cache-dependency-path: |
+        backend/requirements.txt
+        backend/requirements-dev.txt
+  ```
 
 ---
 
