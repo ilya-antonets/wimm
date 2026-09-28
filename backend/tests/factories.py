@@ -4,7 +4,7 @@ from datetime import date
 import factory
 from factory.alchemy import SQLAlchemyModelFactory
 
-from app.models import Bank, Category, Transaction
+from app.models import Bank, Category, ImportBatch, Transaction
 
 
 class BankFactory(SQLAlchemyModelFactory):
@@ -18,6 +18,15 @@ class BankFactory(SQLAlchemyModelFactory):
     skip_header_rows = 0
     skip_footer_rows = 0
     encoding = "utf-8"
+
+
+class ImportBatchFactory(SQLAlchemyModelFactory):
+    class Meta:
+        model = ImportBatch
+        sqlalchemy_session_persistence = "commit"
+
+    bank = factory.SubFactory(BankFactory)
+    filename = factory.Sequence(lambda n: f"file_{n}.csv")
 
 
 class TransactionFactory(SQLAlchemyModelFactory):

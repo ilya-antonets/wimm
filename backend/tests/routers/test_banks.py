@@ -2,12 +2,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from tests.factories import BankFactory, TransactionFactory
+from tests.factories import BankFactory, ImportBatchFactory, TransactionFactory
 
 
 @pytest.fixture(autouse=True)
 def _configure_factories(db: Session) -> None:
     BankFactory._meta.sqlalchemy_session = db
+    ImportBatchFactory._meta.sqlalchemy_session = db
     TransactionFactory._meta.sqlalchemy_session = db
 
 
@@ -72,6 +73,13 @@ def test_update_bank(client: TestClient, db: Session) -> None:
 def test_delete_bank_with_transactions(client: TestClient, db: Session) -> None:
     bank = BankFactory.create()
     TransactionFactory.create(bank=bank)
+    response = client.delete(f"/api/banks/{bank.id}")
+    assert response.status_code == 409
+
+
+def test_delete_bank_with_import_batches(client: TestClient, db: Session) -> None:
+    bank = BankFactory.create()
+    ImportBatchFactory.create(bank=bank)
     response = client.delete(f"/api/banks/{bank.id}")
     assert response.status_code == 409
 

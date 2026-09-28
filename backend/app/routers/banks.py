@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.exceptions import ConflictError, NotFoundError
-from app.models import Bank, ImportBatch, Transaction
+from app.models import Bank
 from app.schemas.banks import BankCreate, BankRead, BankUpdate
 
 router = APIRouter(prefix="/api/banks", tags=["banks"])
@@ -75,16 +75,10 @@ def update_bank(bank_id: int, body: BankUpdate, db: Session = Depends(get_db)) -
 @router.delete("/{bank_id}", status_code=204)
 def delete_bank(bank_id: int, db: Session = Depends(get_db)) -> Response:
     bank = _get_bank_or_404(bank_id, db)
-    has_transactions = db.scalars(
-        select(Transaction).where(Transaction.bank_id == bank_id).limit(1)
-    ).first()
-    if has_transactions:
-        raise ConflictError("Bank has existing transactions; delete them first")
-    has_batches = db.scalars(
-        select(ImportBatch).where(ImportBatch.bank_id == bank_id).limit(1)
-    ).first()
-    if has_batches:
-        raise ConflictError("Bank has existing import batches; delete them first")
     db.delete(bank)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ConflictError("Bank has linked transactions or import batches; remove them first")
     return Response(status_code=204)

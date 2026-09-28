@@ -20,12 +20,18 @@ class BankCreate(BaseModel):
 class BankUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=120)
     column_map: ColumnMap | None = None
-    date_format: str | None = None
+    date_format: str | None = Field(None, min_length=1, max_length=40)
     skip_header_rows: int | None = Field(None, ge=0)
     skip_footer_rows: int | None = Field(None, ge=0)
-    encoding: str | None = None
+    encoding: str | None = Field(None, min_length=1, max_length=30)
 
 
-class BankRead(BankCreate):
-    id: int
+class BankRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    column_map: ColumnMap
+    date_format: str
+    skip_header_rows: int
+    skip_footer_rows: int
+    encoding: str
