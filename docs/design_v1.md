@@ -107,8 +107,13 @@
   
   register_exception_handlers(app)
   
-  for router in [banks, imports, transactions, categories, mappings, suggestions, sankey]:
-      app.include_router(router.router, prefix="/api")
+  app.include_router(banks.router)
+  app.include_router(imports.router)
+  app.include_router(transactions.router)
+  app.include_router(categories.router)
+  app.include_router(mappings.router)
+  app.include_router(suggestions.router)
+  app.include_router(sankey.router)
   ```
   
   **`app/database.py`:**
@@ -216,14 +221,20 @@
   class BankUpdate(BaseModel):
       name: str | None = Field(None, min_length=1, max_length=120)
       column_map: ColumnMap | None = None
-      date_format: str | None = None
+      date_format: str | None = Field(None, min_length=1, max_length=40)
       skip_header_rows: int | None = Field(None, ge=0)
       skip_footer_rows: int | None = Field(None, ge=0)
-      encoding: str | None = None
+      encoding: str | None = Field(None, min_length=1, max_length=30)
   
-  class BankRead(BankCreate):
-      id: int
+  class BankRead(BaseModel):
       model_config = ConfigDict(from_attributes=True)
+      id: int
+      name: str
+      column_map: ColumnMap
+      date_format: str
+      skip_header_rows: int
+      skip_footer_rows: int
+      encoding: str
   ```
   
   #### `POST /api/banks`
@@ -249,7 +260,7 @@
   
   - **Response 204:** No content.
   - **Error 404:** Bank not found.
-  - **Error 409:** Bank has existing transactions or import batches. Deletion is blocked; transactions must be deleted first or bank must be anonymized. The service must check both `transactions` and `import_batches` tables (both carry `ondelete=RESTRICT` FKs) and return 409 if either is non-empty.
+  - **Error 409:** Bank has linked transactions or import batches. Deletion is blocked; remove them first. The router attempts `db.delete(bank); db.commit()` and catches `IntegrityError` raised by the DB's `ondelete=RESTRICT` FKs on both tables — no application-level pre-checks are used.
   
   ---
   
@@ -269,7 +280,7 @@
   # schemas/imports.py
   
   class ImportResult(BaseModel):
-      import_batch_id: int
+      import_batch_id: int | None  # None when all rows were duplicates (no batch created)
       total_rows_parsed: int
       new_transactions: int
       duplicate_transactions: int
@@ -283,7 +294,7 @@
   
   - **Error 400:** `bank_id` not found, file missing, file not parseable with the bank's config (e.g., wrong encoding, missing columns), or zero data rows after skip.
   - **Error 422:** Form validation failure (missing `bank_id`).
-  - **Side effects:** Creates one `import_batches` row; inserts transactions with `INSERT OR IGNORE`; invalidates the ML vectorizer cache so the next Sankey build or `POST /api/suggestions` call re-fits the model with the newly imported transactions (O(1) synchronous call — no ML inference during import).
+  - **Side effects:** Creates one `import_batches` row and inserts transactions only when `new_transactions > 0`; when all rows are already present no batch row is created and `import_batch_id` is `null`. Invalidates the ML vectorizer cache so the next Sankey build or `POST /api/suggestions` call re-fits the model with the newly imported transactions (O(1) synchronous call — no ML inference during import).
   
   ---
   
@@ -651,7 +662,7 @@
   ) -> ImportResult:
       """
       Parse the CSV bytes according to bank.column_map configuration,
-      compute dedup_key for each row, bulk-insert with INSERT OR IGNORE,
+      compute dedup_key for each row, pre-filter duplicates via SELECT,
       and return an ImportResult summary.
   
       Preconditions:
@@ -669,19 +680,20 @@
       4. Drop rows where all canonical columns are NaN.
       5. For each row:
          a. Parse date using bank.date_format → Python date.
-         b. Cast amount to Decimal; positive → type='income', negative → type='expense'.
+         b. Cast amount to Decimal; positive (amount > 0) → type='income', negative or zero → type='expense'.
          c. Compute dedup_key:
-            - If transaction_id_col present and non-null: f"{bank.id}:{row.transaction_id}"
+            - If transaction_id_col present: require a non-empty value — empty → fail the row (add to failed_rows, continue). When non-empty: f"{bank.id}:{row.transaction_id}"
             - Else: hex(sha256(f"{bank.id}|{date}|{Decimal(amount).quantize(Decimal('0.01'))}|{description}".encode()))
+            Using transaction_id_col when configured ensures all rows for a bank use a
+            consistent key format; mixing formats across imports would allow duplicates.
          d. Collect as dict; record failed rows with row number and error message.
-      6. If zero parseable rows: raise ValidationError(400) — no DB write has occurred.
-      7. Create ImportBatch record; flush to get ID.
-      8. Bulk-insert transactions using:
-         INSERT OR IGNORE INTO transactions (...) VALUES (...)
-         via SQLAlchemy core (not ORM) for performance.
-      9. Determine new vs duplicate count by comparing inserted row_count
-         (session.execute result.rowcount) against total attempted.
-      10. Commit. Return ImportResult.
+      6. If zero parseable rows: raise ValidationError(400) with the first 5 per-row errors included — no DB write has occurred.
+      7. SELECT existing dedup_key values from transactions to identify already-imported rows.
+         Filter valid_rows to new_rows = [r for r if r["dedup_key"] not in existing_keys].
+      8. If new_rows is empty: return ImportResult(import_batch_id=None, new_transactions=0, ...) — no DB write.
+      9. Create ImportBatch record; flush to get ID. Assign import_batch_id to each new_rows entry.
+      10. Bulk-insert new_rows using plain INSERT INTO transactions (...) VALUES (...) via SQLAlchemy core.
+          (Caller — the router — calls db.commit() after this function returns.)
       """
   
   def _compute_dedup_key(bank_id: int, date: str, amount: Decimal, description: str) -> str:
@@ -696,7 +708,8 @@
   ```
   
   **Key invariants:**
-  - Never raises on duplicate rows — `INSERT OR IGNORE` handles silently.
+  - Duplicate rows are identified via a pre-SELECT of existing `dedup_key` values; only genuinely new rows are inserted with a plain INSERT.
+  - When `transaction_id` is configured for the bank, every row must supply a non-empty value — a missing value is treated as a parse failure, not a silent hash fallback. This keeps the dedup key format consistent across all imports for a given bank.
   - `failed_rows` accumulates per-row errors without aborting the entire import.
   - A row with a parse failure is counted in `failed_rows` and skipped, not inserted.
   
@@ -1822,26 +1835,26 @@
   
   ```python
   class WIMMException(Exception):
-      """Base class for all application exceptions."""
-      def __init__(self, message: str, status_code: int = 500):
-          self.message = message
+      def __init__(self, detail: str, status_code: int = 500) -> None:
+          self.detail = detail
           self.status_code = status_code
+          super().__init__(detail)
   
   class NotFoundError(WIMMException):
-      def __init__(self, resource: str, id: int | str):
-          super().__init__(f"{resource} with id={id} not found.", 404)
+      def __init__(self, detail: str = "Not found") -> None:
+          super().__init__(detail=detail, status_code=404)
   
   class ConflictError(WIMMException):
-      def __init__(self, message: str):
-          super().__init__(message, 409)
+      def __init__(self, detail: str = "Conflict") -> None:
+          super().__init__(detail=detail, status_code=409)
   
   class ForbiddenError(WIMMException):
-      def __init__(self, message: str):
-          super().__init__(message, 403)
+      def __init__(self, detail: str = "Forbidden") -> None:
+          super().__init__(detail=detail, status_code=403)
   
   class ValidationError(WIMMException):
-      def __init__(self, message: str):
-          super().__init__(message, 400)
+      def __init__(self, detail: str = "Validation error") -> None:
+          super().__init__(detail=detail, status_code=400)
   ```
   
   **`register_exception_handlers` in `app/exceptions.py`:**
@@ -1849,31 +1862,26 @@
   ```python
   from fastapi import FastAPI, Request
   from fastapi.responses import JSONResponse
+  import logging
   
   def register_exception_handlers(app: FastAPI) -> None:
+      logger = logging.getLogger("app.exceptions")
   
       @app.exception_handler(WIMMException)
-      async def wimm_handler(request: Request, exc: WIMMException):
+      async def wimm_exception_handler(request: Request, exc: WIMMException) -> JSONResponse:
+          if exc.status_code >= 500:
+              logger.exception("Internal error: %s", exc.detail, exc_info=exc)
           return JSONResponse(
               status_code=exc.status_code,
-              content={"detail": exc.message},
-          )
-  
-      @app.exception_handler(RequestValidationError)
-      async def validation_handler(request: Request, exc: RequestValidationError):
-          return JSONResponse(
-              status_code=422,
-              content={"detail": exc.errors()},
+              content={"detail": exc.detail},
           )
   
       @app.exception_handler(Exception)
-      async def generic_handler(request: Request, exc: Exception):
-          # Log the full traceback server-side
-          import traceback, logging
-          logging.error(traceback.format_exc())
+      async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+          logger.exception("Unhandled exception", exc_info=exc)
           return JSONResponse(
               status_code=500,
-              content={"detail": "Internal server error. Check backend logs."},
+              content={"detail": "Internal server error"},
           )
   ```
   
@@ -1970,26 +1978,34 @@
     │                           │                          │    → failed_rows[] │
     │                           │                          │       on error     │
     │                           │                          │                    │
-    │                           │                          │ 8. INSERT INTO     │
+    │                           │                          │ 8. SELECT existing │
+    │                           │                          │    dedup_keys from │
+    │                           │                          │    transactions    │
+    │                           │                          ├───────────────────►│
+    │                           │                          │◄──────────────────┤
+    │                           │                          │  existing key set  │
+    │                           │                          │                    │
+    │                           │                          │ 9. If new_rows>0:  │
+    │                           │                          │    INSERT INTO     │
     │                           │                          │    import_batches  │
     │                           │                          ├───────────────────►│
     │                           │                          │◄──────────────────┤
     │                           │                          │    batch_id        │
     │                           │                          │                    │
-    │                           │                          │ 9. Bulk INSERT OR  │
-    │                           │                          │    IGNORE INTO     │
-    │                           │                          │    transactions    │
+    │                           │                          │ 10. Bulk INSERT    │
+    │                           │                          │     INTO           │
+    │                           │                          │     transactions   │
+    │                           │                          │     (new_rows only)│
     │                           │                          ├───────────────────►│
-    │                           │                          │◄──────────────────┤
-    │                           │                          │  rowcount (new)    │
-    │                           │                          │                    │
-    │                           │                          │ 10. Commit         │
     │                           │                          │                    │
     │                           │◄─────────────────────────┤                    │
     │                           │    ImportResult           │                    │
+    │                           │    (batch_id may be null)│                    │
     │                           │                          │                    │
-    │                           │ 11. Background task:     │                    │
-    │                           │  get_suggester().        │                    │
+    │                           │ 11. db.commit()          │                    │
+    │                           ├───────────────────────────────────────────────►│
+    │                           │                          │                    │
+    │                           │ 12. get_suggester().     │                    │
     │                           │  invalidate()            │                    │
     │                           │  (marks cache dirty;     │                    │
     │                           │   no blocking ML here)   │                    │
@@ -2009,13 +2025,13 @@
     │     ["sankey"]            │                          │                    │
   ```
   
-  **Step 11 — ML invalidation detail:** The router calls `get_suggester().invalidate()` synchronously after a successful import. This is O(1) (sets a boolean). The actual re-fit of the TF-IDF vectorizer happens lazily on the next `POST /api/suggestions` call or Sankey build, not here — so the import response is never delayed by ML computation.
+  **Step 12 — ML invalidation detail:** The router calls `get_suggester().invalidate()` synchronously after `db.commit()`. This is O(1) (sets a boolean). The actual re-fit of the TF-IDF vectorizer happens lazily on the next `POST /api/suggestions` call or Sankey build, not here — so the import response is never delayed by ML computation.
   
   **Error handling during import:**
   
   - Decode failure (wrong encoding) → `ValidationError(400)` before any DB write.
   - Missing required columns → `ValidationError(400)` before any DB write.
-  - Zero parseable rows (all failed) → `ValidationError(400)`.
+  - Zero parseable rows (all failed) → `ValidationError(400)` with the first 5 per-row error messages in the detail string.
   - Partial failures (some rows bad): insert what succeeded, accumulate `failed_rows` in `ImportResult`; return `201` if any new transactions were inserted, `200` if all inserted rows were duplicates.
   
   ---
