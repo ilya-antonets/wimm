@@ -78,7 +78,9 @@ def delete_bank(bank_id: int, db: Session = Depends(get_db)) -> Response:
     db.delete(bank)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
-        raise ConflictError("Bank has linked transactions or import batches; remove them first")
+        raise ConflictError(
+            "Bank has linked transactions or import batches; remove them first"
+        ) from e
     return Response(status_code=204)
