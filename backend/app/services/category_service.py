@@ -15,7 +15,11 @@ UNCATEGORIZED_ID = 1
 def get_all_categories(db: Session) -> list[Category]:
     """Returns all categories ordered by (parent_id NULLS FIRST, sort_order, id)."""
     return list(
-        db.scalars(select(Category).order_by(Category.parent_id, Category.sort_order, Category.id))
+        db.scalars(
+            select(Category).order_by(
+                Category.parent_id.nulls_first(), Category.sort_order, Category.id
+            )
+        )
     )
 
 
@@ -46,6 +50,8 @@ def rename_category(
         raise NotFoundError(f"Category {category_id} not found")
     if category_id == UNCATEGORIZED_ID:
         raise ForbiddenError("Cannot modify the Uncategorized category")
+    if new_name is None and new_sort_order is None:
+        return cat
     if new_name is not None:
         _check_sibling_conflict(db, new_name, cat.parent_id, exclude_id=category_id)
         cat.name = new_name
@@ -70,6 +76,7 @@ def move_category(
     if new_parent_id is not None and db.get(Category, new_parent_id) is None:
         raise NotFoundError(f"Parent category {new_parent_id} not found")
     _assert_no_cycle(db, category_id, new_parent_id)
+    _check_sibling_conflict(db, cat.name, new_parent_id, exclude_id=category_id)
     cat.parent_id = new_parent_id
     cat.sort_order = sort_order
     db.commit()

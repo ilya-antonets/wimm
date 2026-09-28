@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.exceptions import ForbiddenError, NotFoundError
 from app.models import Category
 from app.schemas.categories import (
     CategoryCreate,
@@ -14,15 +13,6 @@ from app.services import category_service as svc
 from app.services.ml_suggester import get_suggester
 
 router = APIRouter(prefix="/api/categories", tags=["categories"])
-
-UNCATEGORIZED_ID = 1
-
-
-def _get_category_or_404(category_id: int, db: Session) -> Category:
-    cat = db.get(Category, category_id)
-    if cat is None:
-        raise NotFoundError(f"Category {category_id} not found")
-    return cat
 
 
 @router.get("", response_model=list[CategoryRead])
@@ -39,8 +29,6 @@ def create_category(body: CategoryCreate, db: Session = Depends(get_db)) -> Cate
 def update_category(
     category_id: int, body: CategoryUpdate, db: Session = Depends(get_db)
 ) -> Category:
-    if category_id == UNCATEGORIZED_ID:
-        raise ForbiddenError("Cannot modify the Uncategorized category")
     return svc.rename_category(db, category_id, body.name, body.sort_order)
 
 
