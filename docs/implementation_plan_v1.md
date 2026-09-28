@@ -84,6 +84,7 @@ None — the CI workflow is the deliverable. Enable branch protection on `main` 
 ---
 
 ## Stage 1 — Backend Foundation
+**Status: COMPLETED**
 **PR:** `feat(backend): project scaffold, ORM models, Alembic migration, config, and app skeleton`
 
 ### Files created
