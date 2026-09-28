@@ -85,9 +85,7 @@ def import_csv(
             amount = Decimal(amount_str)
         except InvalidOperation as e:
             failed_rows.append(
-                FailedRow(
-                    row_number=row_idx, raw_data=raw_data, error=f"Amount parse error: {e}"
-                )
+                FailedRow(row_number=row_idx, raw_data=raw_data, error=f"Amount parse error: {e}")
             )
             continue
 
