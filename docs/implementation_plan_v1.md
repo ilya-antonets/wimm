@@ -147,7 +147,8 @@ None — the CI workflow is the deliverable. Enable branch protection on `main` 
 ---
 
 ## Stage 3 — CSV Import
-**PR:** `feat(backend): CSV import service with dedup, pandas parsing, and import endpoint`
+**Status: COMPLETED**
+**PR:** #7 — `feat(backend): CSV import service with dedup, pandas parsing, and import endpoint`
 
 MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns `[]` until Stage 6).
 
