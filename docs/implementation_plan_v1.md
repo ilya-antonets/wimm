@@ -169,11 +169,12 @@ MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns 
 ---
 
 ## Stage 4 — Categories CRUD
-**PR:** `feat(backend): category tree CRUD with recursive CTE delete, cycle prevention, and protected root`
+**Status: COMPLETED**
+**PR:** #8 — `feat(backend): category tree CRUD with recursive CTE delete, cycle prevention, and protected root`
 
 ### Files created
 - `backend/app/schemas/categories.py` — `CategoryCreate`, `CategoryUpdate` (rename+sort_order only, no parent_id), `CategoryRead`, `CategoryMoveRequest`
-- `backend/app/services/category_service.py` — `get_all_categories`, `create_category`, `rename_category`, `move_category`, `delete_category`, `_get_subtree_ids` (recursive CTE returning IDs depth-DESC), `_assert_no_cycle`. `delete_category` sequence: (1) CTE subtree, (2) `UPDATE mappings SET category_id=1`, (3) DELETE deepest-first, (4) commit, (5) `get_suggester().invalidate()`
+- `backend/app/services/category_service.py` — `get_all_categories`, `create_category`, `rename_category`, `move_category`, `delete_category`, `_get_subtree_ids` (recursive CTE returning IDs depth-DESC), `_assert_no_cycle`, `_check_sibling_conflict`. `delete_category` sequence: (1) CTE subtree, (2) `UPDATE mappings SET category_id=1`, (3) DELETE deepest-first loop (required: SQLite FK RESTRICT checked per row, depth-DESC order ensures leaves before parents), (4) commit, (5) `get_suggester().invalidate()`
 - `backend/app/routers/categories.py` — `GET` (200), `POST` (201/400/409), `PUT /{id}` (200/403/404/409), `PATCH /{id}/move` (200/400/403/404), `DELETE /{id}` (204/403/404)
 - `backend/tests/test_category_service.py`, `backend/tests/routers/test_categories.py`
 
