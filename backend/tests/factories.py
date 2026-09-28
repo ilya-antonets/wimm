@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 
 import factory
 from factory.alchemy import SQLAlchemyModelFactory
@@ -25,7 +26,7 @@ class TransactionFactory(SQLAlchemyModelFactory):
         sqlalchemy_session_persistence = "commit"
 
     bank = factory.SubFactory(BankFactory)
-    date = "2025-01-15"
+    date = date(2025, 1, 15)
     amount = factory.Faker("pydecimal", left_digits=4, right_digits=2, positive=False)
     description = factory.Faker("sentence", nb_words=4)
     type = "expense"
