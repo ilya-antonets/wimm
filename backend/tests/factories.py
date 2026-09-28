@@ -4,7 +4,7 @@ from datetime import date
 import factory
 from factory.alchemy import SQLAlchemyModelFactory
 
-from app.models import Bank, Category, ImportBatch, Transaction
+from app.models import Bank, Category, ImportBatch, Mapping, Transaction
 
 
 class BankFactory(SQLAlchemyModelFactory):
@@ -50,3 +50,12 @@ class CategoryFactory(SQLAlchemyModelFactory):
     name = factory.Sequence(lambda n: f"Category {n}")
     parent_id = None
     sort_order = factory.Sequence(lambda n: n)
+
+
+class MappingFactory(SQLAlchemyModelFactory):
+    class Meta:
+        model = Mapping
+        sqlalchemy_session_persistence = "commit"
+
+    transaction = factory.SubFactory(TransactionFactory)
+    category = factory.SubFactory(CategoryFactory)

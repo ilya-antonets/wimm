@@ -12,7 +12,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.exceptions import register_exception_handlers
-from app.routers import banks, imports
+from app.routers import banks, categories, imports
 from app.services.ml_suggester import get_suggester
 
 _access_log = logging.getLogger("app.middleware")
@@ -79,6 +79,7 @@ app.add_middleware(AccessLogMiddleware)
 register_exception_handlers(app)
 
 app.include_router(banks.router)
+app.include_router(categories.router)
 app.include_router(imports.router)
 
 

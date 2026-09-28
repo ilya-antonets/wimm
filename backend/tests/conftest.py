@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -26,6 +26,9 @@ def db_engine() -> Generator[Engine, None, None]:
 
     Base.metadata.create_all(engine)
     yield engine
+    with engine.connect() as conn:
+        conn.execute(text("PRAGMA foreign_keys = OFF"))
+        conn.commit()
     Base.metadata.drop_all(engine)
     engine.dispose()
 
