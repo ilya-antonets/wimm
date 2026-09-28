@@ -97,8 +97,8 @@ None — the CI workflow is the deliverable. Enable branch protection on `main` 
 - `backend/app/database.py` — engine, `set_sqlite_pragma` event listener (PRAGMA foreign_keys=ON), `SessionLocal`, `Base`, `get_db`
 - `backend/app/models.py` — all 5 ORM models with `Mapped[T]` annotations: `Bank` (JSON column_map), `ImportBatch` (FK→banks RESTRICT), `Transaction` (FK→banks RESTRICT, FK→import_batches SET NULL, Numeric(12,4), dedup_key UNIQUE, composite indexes, `mapping` relationship cascade=all+delete-orphan), `Category` (self-referential FK RESTRICT), `Mapping` (transaction_id UNIQUE FK CASCADE, category_id FK RESTRICT)
 - `backend/app/exceptions.py` — `WIMMException`, `NotFoundError` (404), `ConflictError` (409), `ForbiddenError` (403), `ValidationError` (400), `register_exception_handlers`
-- `backend/app/logging_config.py` — `configure_logging()`, `JsonFormatter`, `_STD_LOG_FIELDS`, `AccessLogMiddleware`
-- `backend/app/main.py` — lifespan (configure_logging → `alembic upgrade head`), CORS, `AccessLogMiddleware`, `register_exception_handlers`, `GET /api/health → {"status": "ok"}`, empty router list
+- `backend/app/logging_config.py` — `configure_logging()`, `JsonFormatter`, `_STD_LOG_FIELDS`
+- `backend/app/main.py` — lifespan (configure_logging → `alembic upgrade head`), CORS, `AccessLogMiddleware` (inline class in `main.py`), `register_exception_handlers`, `GET /api/health → {"status": "ok"}`, empty router list
 - `backend/tests/conftest.py` — `db_engine` (in-memory SQLite, `Base.metadata.create_all` + seeds Uncategorized id=1), `db` fixture, `client` fixture (overrides `get_db`, overrides lifespan to skip Alembic subprocess)
 - `backend/tests/factories.py` — `BankFactory`, `TransactionFactory`, `CategoryFactory` using factory-boy
 
@@ -121,17 +121,19 @@ None — the CI workflow is the deliverable. Enable branch protection on `main` 
 ---
 
 ## Stage 2 — Banks CRUD
-**PR:** `feat(backend): banks CRUD endpoints with conflict and constraint handling`
+**Status: COMPLETED**
+**PR:** #6 — `feat(backend): banks CRUD endpoints with conflict and constraint handling`
 
 ### Files created
-- `backend/app/schemas/banks.py` — `ColumnMap`, `BankCreate`, `BankUpdate`, `BankRead`
-- `backend/app/routers/banks.py` — `GET /api/banks`, `POST` (201/409), `GET /{id}` (200/404), `PUT /{id}` (200/404/409), `DELETE /{id}` (204/404/409 — checks both transactions and import_batches)
+- `backend/app/schemas/banks.py` — `ColumnMap`, `BankCreate`, `BankUpdate`, `BankRead` (standalone class, not inheriting `BankCreate`)
+- `backend/app/routers/banks.py` — `GET /api/banks`, `POST` (201/409), `GET /{id}` (200/404), `PUT /{id}` (200/404/409), `DELETE /{id}` (204/404/409 — catches `IntegrityError` on commit; both tables have `ondelete=RESTRICT`)
 - `backend/tests/routers/test_banks.py`
 
 ### Modified
 - `backend/app/main.py` — register `banks.router`
+- `backend/tests/factories.py` — add `ImportBatchFactory`
 
-### Tests (8 cases)
+### Tests (9 cases)
 - `test_list_banks_empty` — 200 `[]`
 - `test_create_bank` — 201, row in DB
 - `test_create_bank_missing_column_map` — 422
@@ -139,6 +141,7 @@ None — the CI workflow is the deliverable. Enable branch protection on `main` 
 - `test_get_bank_not_found` — 404
 - `test_update_bank` — 200, DB updated
 - `test_delete_bank_with_transactions` — 409
+- `test_delete_bank_with_import_batches` — 409
 - `test_delete_empty_bank` — 204
 
 ---
@@ -150,13 +153,13 @@ MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns 
 
 ### Files created
 - `backend/app/schemas/imports.py` — `FailedRow`, `ImportResult`
-- `backend/app/services/csv_importer.py` — `import_csv(db, bank, file_content, filename) -> ImportResult`: decode bytes → `pandas.read_csv` (skiprows/skipfooter, `engine='python'` — required for skipfooter) → rename via column_map → per-row parse (date, amount, type, dedup_key) → create `ImportBatch` → bulk `INSERT OR IGNORE` → commit. `_compute_dedup_key`: uses `bank_id:external_id` if `column_map.transaction_id` set, else `hex(SHA-256(bank_id|date|amount_2dp|description))`
+- `backend/app/services/csv_importer.py` — `import_csv(db, bank, file_content, filename) -> ImportResult`: decode bytes → `pandas.read_csv` (skiprows/skipfooter, `engine='python'` — required for skipfooter) → rename via column_map → per-row parse (date, amount, type, dedup_key) → pre-SELECT existing dedup_keys → skip insert and return `import_batch_id=None` if no new rows → create `ImportBatch` → plain bulk `INSERT INTO`. Transaction boundary owned by the router (caller calls `db.commit()`). `_compute_dedup_key`: uses `bank_id:external_id` if `column_map.transaction_id` set and row tx_id is non-empty (empty tx_id fails the row); else `hex(SHA-256(bank_id|date|amount_2dp|description))`
 - `backend/app/services/ml_suggester.py` — `MLSuggester` with `threading.Lock`, `invalidate()`, stub `suggest()`, `get_suggester()` singleton with double-checked locking
 - `backend/app/routers/imports.py` — `POST /api/import` (multipart: `bank_id` int + `file` UploadFile, validates `.csv`, calls `import_csv`, calls `get_suggester().invalidate()`, returns 201/200/400)
 - `backend/tests/test_csv_importer.py`, `backend/tests/routers/test_imports.py`
 
 ### Modified
-- `backend/app/main.py` — register `imports.router`, attach `get_suggester()` to `app.state`
+- `backend/app/main.py` — register `imports.router`, call `get_suggester()` at lifespan for eager singleton init (result not stored on `app.state`)
 
 ### Tests
 `test_csv_importer.py` (9 cases): basic import, dedup by hash, dedup by external ID, skip rows, income/expense sign detection, latin-1 encoding, invalid date format, missing required column  

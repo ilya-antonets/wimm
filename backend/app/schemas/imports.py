@@ -8,7 +8,7 @@ class FailedRow(BaseModel):
 
 
 class ImportResult(BaseModel):
-    import_batch_id: int
+    import_batch_id: int | None
     total_rows_parsed: int
     new_transactions: int
     duplicate_transactions: int

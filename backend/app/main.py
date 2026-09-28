@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         output = (stdout.decode() + "\n" + stderr.decode()).strip()
         raise RuntimeError(f"Alembic migration failed:\n{output}")
 
-    app.state.suggester = get_suggester()
+    get_suggester()  # eager-init the ML singleton at startup
 
     yield
 

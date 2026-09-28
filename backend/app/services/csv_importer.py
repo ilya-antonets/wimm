@@ -5,7 +5,7 @@ from io import StringIO
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import insert
+from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
 from app.exceptions import ValidationError
@@ -91,11 +91,17 @@ def import_csv(
             )
             continue
 
-        tx_type = "income" if amount >= 0 else "expense"
+        tx_type = "income" if amount > 0 else "expense"
         description = str(row[desc_col]).strip()
 
-        if tx_id_col is not None and str(row[tx_id_col]).strip():
-            dedup_key = f"{bank.id}:{str(row[tx_id_col]).strip()}"
+        if tx_id_col is not None:
+            tx_id_val = str(row[tx_id_col]).strip()
+            if not tx_id_val:
+                failed_rows.append(
+                    FailedRow(row_number=row_idx, raw_data=raw_data, error="Empty transaction_id")
+                )
+                continue
+            dedup_key = f"{bank.id}:{tx_id_val}"
         else:
             dedup_key = _compute_dedup_key(bank.id, str(date_val), amount, description)
 
@@ -112,29 +118,46 @@ def import_csv(
 
     # 6. Fail-fast if nothing is parseable
     if not valid_rows:
-        raise ValidationError("No parseable rows found in CSV")
+        summary = "; ".join(f"row {r.row_number}: {r.error}" for r in failed_rows[:5])
+        raise ValidationError(f"No parseable rows found in CSV. {summary}")
 
-    # 7. Create ImportBatch; flush to get id
+    # 7. Pre-filter known duplicates with a portable SELECT
+    existing_keys: set[str] = set(
+        db.scalars(
+            select(Transaction.dedup_key).where(
+                Transaction.dedup_key.in_([r["dedup_key"] for r in valid_rows])
+            )
+        )
+    )
+    new_rows = [r for r in valid_rows if r["dedup_key"] not in existing_keys]
+    duplicate_count = len(valid_rows) - len(new_rows)
+
+    # 8. Return early when every row is a duplicate (no batch row created)
+    if not new_rows:
+        return ImportResult(
+            import_batch_id=None,
+            total_rows_parsed=len(valid_rows) + len(failed_rows),
+            new_transactions=0,
+            duplicate_transactions=duplicate_count,
+            failed_rows=failed_rows,
+        )
+
+    # 9. Create ImportBatch; flush to get id
     import_batch = ImportBatch(bank_id=bank.id, filename=filename)
     db.add(import_batch)
     db.flush()
 
-    for tx_row in valid_rows:
+    for tx_row in new_rows:
         tx_row["import_batch_id"] = import_batch.id
 
-    # 8. Bulk INSERT OR IGNORE (single multi-values statement for correct rowcount)
-    stmt = insert(Transaction).prefix_with("OR IGNORE").values(valid_rows)
-    cursor = db.execute(stmt)
-    new_count: int = cursor.rowcount
-
-    # 9. Commit
-    db.commit()
+    # 10. Bulk INSERT (plain — no dialect-specific conflict clause needed)
+    db.execute(insert(Transaction).values(new_rows))
 
     return ImportResult(
         import_batch_id=import_batch.id,
         total_rows_parsed=len(valid_rows) + len(failed_rows),
-        new_transactions=new_count,
-        duplicate_transactions=len(valid_rows) - new_count,
+        new_transactions=len(new_rows),
+        duplicate_transactions=duplicate_count,
         failed_rows=failed_rows,
     )
 

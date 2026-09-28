@@ -28,6 +28,7 @@ async def upload_csv(
 
     content = await file.read()
     result = import_csv(db, bank, content, filename)
+    db.commit()
 
     get_suggester().invalidate()
 
