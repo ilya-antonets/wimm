@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.database import get_db
 from app.main import app
@@ -13,7 +14,11 @@ from app.models import Base, Category
 
 @pytest.fixture(scope="function")
 def db_engine() -> Generator[Engine, None, None]:
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection: object, connection_record: object) -> None:
