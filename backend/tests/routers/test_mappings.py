@@ -148,3 +148,49 @@ def test_delete_invalidates_ml_cache(client: TestClient, mocker: MockerFixture) 
     response = client.delete(f"/api/mappings/{tx.id}")
     assert response.status_code == 204
     mock_suggester.invalidate.assert_called_once()
+
+
+def test_create_mapping_successful_race(
+    client: TestClient, db: Session, mocker: MockerFixture
+) -> None:
+    # Simulate the concurrent-insert path: pre-check SELECT sees no mapping, commit
+    # raises IntegrityError (another writer got there first), rollback clears the
+    # session, and the post-error SELECT finds the mapping the winner inserted.
+    tx = TransactionFactory.create(type="expense")
+    category1 = CategoryFactory.create()
+    category2 = CategoryFactory.create()
+
+    # The "winning" concurrent writer's row already committed to the DB.
+    MappingFactory.create(transaction=tx, category=category1)
+
+    call_count = [0]
+    real_scalars = db.scalars
+
+    def patched_scalars(stmt: object, *args: object, **kwargs: object) -> object:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            # Pre-check window: pretend no mapping exists yet.
+            m = mocker.MagicMock()
+            m.first.return_value = None
+            return m
+        return real_scalars(stmt, *args, **kwargs)  # type: ignore[arg-type]
+
+    mocker.patch.object(db, "scalars", side_effect=patched_scalars)
+
+    commit_count = [0]
+    real_commit = db.commit
+
+    def patched_commit() -> None:
+        commit_count[0] += 1
+        if commit_count[0] == 1:
+            raise IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed"))
+        real_commit()
+
+    mocker.patch.object(db, "commit", side_effect=patched_commit)
+
+    response = client.post(
+        "/api/mappings",
+        json={"transaction_id": tx.id, "category_id": category2.id},
+    )
+    assert response.status_code == 200
+    assert response.json()["category_id"] == category2.id

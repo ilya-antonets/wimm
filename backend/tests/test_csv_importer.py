@@ -113,3 +113,62 @@ def test_all_rows_failed(db: Session) -> None:
     with pytest.raises(ValidationError) as exc_info:
         import_csv(db, bank, csv, "test.csv")
     assert "No parseable rows" in str(exc_info.value)
+
+
+def test_encoding_error_raises_validation_error(db: Session) -> None:
+    bank = BankFactory.create(encoding="ascii")
+    # Latin-1 byte sequence that is invalid ASCII
+    csv = "date,amount,description\n2024-01-15,-50.00,Caf\xe9".encode("latin-1")
+    with pytest.raises(ValidationError, match="Cannot decode"):
+        import_csv(db, bank, csv, "test.csv")
+
+
+def test_column_index_out_of_range(db: Session) -> None:
+    bank = BankFactory.create()
+    bank.column_map = {"date": 0, "amount": 99, "description": 2}
+    db.commit()
+    csv = b"date,amount,description\n2024-01-15,-50.00,Coffee"
+    with pytest.raises(ValidationError, match="Column mapping error"):
+        import_csv(db, bank, csv, "test.csv")
+
+
+def test_amount_parse_error_partial_success(db: Session) -> None:
+    bank = BankFactory.create()
+    csv = (
+        b"date,amount,description\n"
+        b"2024-01-15,-50.00,Coffee\n"
+        b"2024-01-16,NOT_A_NUMBER,Grocery\n"
+        b"2024-01-17,2000.00,Salary"
+    )
+    result = import_csv(db, bank, csv, "test.csv")
+    assert result.total_rows_parsed == 3
+    assert result.new_transactions == 2
+    assert len(result.failed_rows) == 1
+    assert result.failed_rows[0].row_number == 2
+    assert "Amount parse error" in result.failed_rows[0].error
+
+
+def test_empty_transaction_id_fails_row(db: Session) -> None:
+    bank = BankFactory.create()
+    bank.column_map = {"date": 0, "amount": 1, "description": 2, "transaction_id": 3}
+    db.commit()
+    csv = b"date,amount,description,tx_id\n2024-01-15,-50.00,Coffee,TX001\n2024-01-16,-30.00,Tea,"
+    result = import_csv(db, bank, csv, "test.csv")
+    assert result.new_transactions == 1
+    assert len(result.failed_rows) == 1
+    assert "Empty transaction_id" in result.failed_rows[0].error
+
+
+def test_transaction_id_column_not_in_csv(db: Session) -> None:
+    bank = BankFactory.create()
+    bank.column_map = {
+        "date": "date",
+        "amount": "amount",
+        "description": "desc",
+        "transaction_id": "tx_id",
+    }
+    db.commit()
+    # CSV has no tx_id column
+    csv = b"date,amount,desc\n2024-01-15,-50.00,Coffee"
+    with pytest.raises(ValidationError, match="transaction_id column"):
+        import_csv(db, bank, csv, "test.csv")

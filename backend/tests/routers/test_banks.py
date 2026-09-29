@@ -91,3 +91,36 @@ def test_delete_empty_bank(client: TestClient, db: Session) -> None:
     from app.models import Bank
 
     assert db.get(Bank, bank.id) is None
+
+
+def test_create_bank_duplicate_name(client: TestClient) -> None:
+    client.post("/api/banks", json=VALID_BANK_BODY)
+    response = client.post("/api/banks", json=VALID_BANK_BODY)
+    assert response.status_code == 409
+
+
+def test_update_bank_all_fields(client: TestClient, db: Session) -> None:
+    bank = BankFactory.create()
+    new_body = {
+        "name": "Updated Bank",
+        "column_map": {"date": "Date", "amount": "Amount", "description": "Desc"},
+        "date_format": "%d/%m/%Y",
+        "skip_header_rows": 1,
+        "skip_footer_rows": 2,
+        "encoding": "latin-1",
+    }
+    response = client.put(f"/api/banks/{bank.id}", json=new_body)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "Updated Bank"
+    assert data["date_format"] == "%d/%m/%Y"
+    assert data["skip_header_rows"] == 1
+    assert data["skip_footer_rows"] == 2
+    assert data["encoding"] == "latin-1"
+
+
+def test_update_bank_duplicate_name(client: TestClient) -> None:
+    b1 = BankFactory.create()
+    b2 = BankFactory.create()
+    response = client.put(f"/api/banks/{b2.id}", json={"name": b1.name})
+    assert response.status_code == 409
