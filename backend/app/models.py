@@ -135,4 +135,8 @@ class Mapping(Base):
     transaction: Mapped[Transaction] = relationship("Transaction", back_populates="mapping")
     category: Mapped[Category] = relationship("Category", back_populates="mappings")
 
+    @property
+    def category_name(self) -> str:
+        return self.category.name
+
     __table_args__ = (Index("ix_mappings_category_id", "category_id"),)
