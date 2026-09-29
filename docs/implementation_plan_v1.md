@@ -189,7 +189,7 @@ MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns 
 
 ## Stage 5 — Transactions API
 **Status: COMPLETED**
-**PR:** `feat(backend): transactions list/filter/delete endpoint with full pagination and query param support`
+**PR:** #9 — `feat(backend): transactions list/filter/delete endpoint with full pagination and query param support`
 
 ### Files created
 - `backend/app/schemas/transactions.py` — `MappingInfo`, `TransactionRead` (includes `bank_name`, embedded `mapping: MappingInfo | None`), `TransactionPage`
