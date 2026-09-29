@@ -12,7 +12,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.exceptions import register_exception_handlers
-from app.routers import banks, categories, imports, transactions
+from app.routers import banks, categories, imports, mappings, suggestions, transactions
 from app.services.ml_suggester import get_suggester
 
 _access_log = logging.getLogger("app.middleware")
@@ -82,6 +82,8 @@ app.include_router(banks.router)
 app.include_router(categories.router)
 app.include_router(imports.router)
 app.include_router(transactions.router)
+app.include_router(mappings.router)
+app.include_router(suggestions.router)
 
 
 @app.get("/api/health")

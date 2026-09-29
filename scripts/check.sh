@@ -10,7 +10,7 @@ run_backend() {
         echo "=== Backend checks ==="
         ruff check backend/
         ruff format --check backend/
-        mypy backend/app/
+        mypy --config-file backend/pyproject.toml backend/app/
         pytest backend/ --tb=short
     fi
 }
