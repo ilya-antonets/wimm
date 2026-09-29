@@ -230,6 +230,7 @@ The `MLSuggester` stub from Stage 3 gains its full implementation.
 ---
 
 ## Stage 7 — Sankey Service + API
+**Status: COMPLETED**
 **PR:** `feat(backend): 10-step Sankey assembly algorithm with ML-implied categorization and endpoint`
 
 ### Files created
