@@ -193,7 +193,7 @@ MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns 
 
 ### Files created
 - `backend/app/schemas/transactions.py` — `MappingInfo`, `TransactionRead` (includes `bank_name`, embedded `mapping: MappingInfo | None`), `TransactionPage`
-- `backend/app/routers/transactions.py` — `GET /api/transactions` (query params: `date_from`, `date_to`, `type`, `bank_id`, `category_id`, `unmapped`, `search`, `ids` comma-separated, `page` ge=1, `page_size` ge=1 le=200); `DELETE /api/transactions/{id}` (204/404, cascade deletes mapping). `ids`-mode returns the complete requested set **unpaginated** (`pages=1`); an empty/whitespace-only `ids` param falls through to the normal filters. `search` escapes LIKE metacharacters (`%`, `_`, `\`) so they match literally.
+- `backend/app/routers/transactions.py` — `GET /api/transactions` (query params: `date_from`, `date_to`, `type`, `bank_id`, `category_id`, `unmapped`, `search`, `ids` comma-separated, `page` ge=1, `page_size` ge=1 le=200); `DELETE /api/transactions/{id}` (204/404, cascade deletes mapping, invalidates the ML cache via `get_suggester().invalidate()` since the training corpus shrinks). `ids`-mode returns the complete requested set **unpaginated** (`pages=1`); an empty/whitespace-only `ids` param falls through to the normal filters. `search` escapes LIKE metacharacters (`%`, `_`, `\`) so they match literally.
 - `backend/tests/routers/test_transactions.py`
 
 ### Modified
@@ -206,7 +206,8 @@ MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns 
 ---
 
 ## Stage 6 — Mappings + ML Suggestion Engine
-**PR:** `feat(backend): category mappings upsert/delete and TF-IDF ML suggestion engine`
+**Status: COMPLETED**  
+**PR:** #10 — `feat(backend): category mappings upsert/delete and TF-IDF ML suggestion engine`
 
 The `MLSuggester` stub from Stage 3 gains its full implementation.
 
