@@ -1,5 +1,6 @@
 import logging
 from collections import defaultdict
+from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
 
@@ -17,6 +18,14 @@ logger = logging.getLogger(__name__)
 EXPENSES_NODE_ID = "__expenses__"
 PROFICIT_NODE_ID = "__proficit__"
 DEFICIT_NODE_ID = "__deficit__"
+
+
+def _ancestors(cat_id: int, cat_map: dict[int, Category]) -> Iterator[int]:
+    """Yield ancestor category ids from immediate parent up to the root."""
+    current = cat_map[cat_id]
+    while current.parent_id is not None:
+        yield current.parent_id
+        current = cat_map[current.parent_id]
 
 
 def build_sankey(
@@ -94,8 +103,10 @@ def _income_nodes_and_links(
     for tx_id, description, amount in rows:
         node_id = f"income_{tx_id}"
         nodes.append(SankeyNode(id=node_id, name=str(description)[:40]))
-        links.append(SankeyLink(source=node_id, target=EXPENSES_NODE_ID, value=float(amount)))
-        total_income += amount
+        # abs() mirrors the expense path: guards against a wrong-sign import so the
+        # link value stays positive (ECharts requires it) and period_income is not understated.
+        links.append(SankeyLink(source=node_id, target=EXPENSES_NODE_ID, value=float(abs(amount))))
+        total_income += abs(amount)
     return nodes, links, total_income
 
 
@@ -152,12 +163,9 @@ def _expense_nodes_and_links(
     for cat_id, total in raw_totals.items():
         node_totals[cat_id] += total
         visible_ids.add(cat_id)
-        current = cat_map[cat_id]
-        while current.parent_id is not None:
-            parent = cat_map[current.parent_id]
-            node_totals[parent.id] += total
-            visible_ids.add(parent.id)
-            current = parent
+        for ancestor_id in _ancestors(cat_id, cat_map):
+            node_totals[ancestor_id] += total
+            visible_ids.add(ancestor_id)
 
     total_expenses = sum(raw_totals.values(), Decimal(0))
 
@@ -170,14 +178,23 @@ def _expense_nodes_and_links(
     for tx_id, cat_id in mapped_by_tx.items():
         direct_tx_ids_by_cat[cat_id].append(tx_id)
         tx_ids_by_cat[cat_id].append(tx_id)
-        current = cat_map[cat_id]
-        while current.parent_id is not None:
-            tx_ids_by_cat[current.parent_id].append(tx_id)
-            current = cat_map[current.parent_id]
+        for ancestor_id in _ancestors(cat_id, cat_map):
+            tx_ids_by_cat[ancestor_id].append(tx_id)
 
-    # A category is a branch node if any visible node references it as parent.
+    # A category is a branch node if any visible node references it as parent. Step 6
+    # already marks every ancestor visible, so a non-None parent is always visible.
     nodes_with_children = {
-        cat_map[c].parent_id for c in visible_ids if cat_map[c].parent_id in visible_ids
+        cat_map[c].parent_id for c in visible_ids if cat_map[c].parent_id is not None
+    }
+
+    # Branch categories that carry their own directly-mapped expenses need a synthetic
+    # child node so the diagram stays balanced (inflow = outflow for every node). Gate on
+    # a positive rolled-up total, not merely tx count: a branch whose direct transactions
+    # sum to zero would otherwise emit a node with no connecting link (an orphan).
+    direct_node_cat_ids = {
+        cat_id
+        for cat_id in visible_ids
+        if cat_id in nodes_with_children and raw_totals.get(cat_id, Decimal(0)) > 0
     }
 
     nodes: list[SankeyNode] = []
@@ -190,9 +207,7 @@ def _expense_nodes_and_links(
                 transaction_ids=tx_ids_by_cat.get(cat_id),
             )
         )
-        # A branch node with directly-mapped transactions needs a synthetic child
-        # so the diagram stays balanced (inflow = outflow for every node).
-        if cat_id in nodes_with_children and direct_tx_ids_by_cat.get(cat_id):
+        if cat_id in direct_node_cat_ids:
             nodes.append(
                 SankeyNode(
                     id=f"cat_{cat_id}_direct",
@@ -214,7 +229,7 @@ def _expense_nodes_and_links(
         )
         # Route a branch node's own direct transactions into its synthetic child;
         # without this the branch node's inflow > outflow, which ECharts rejects.
-        if cat_id in nodes_with_children and raw_totals.get(cat_id, Decimal(0)) > 0:
+        if cat_id in direct_node_cat_ids:
             links.append(
                 SankeyLink(
                     source=f"cat_{cat_id}",

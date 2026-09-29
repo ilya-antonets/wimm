@@ -259,3 +259,37 @@ def test_synthetic_child_for_branch_with_direct_transactions(db: Session) -> Non
     assert child_link is not None and child_link.value == 30.0
     direct_link = _link(payload.links, f"cat_{parent.id}", f"cat_{parent.id}_direct")
     assert direct_link is not None and direct_link.value == 70.0
+
+
+def test_negative_income_amount_yields_positive_link(db: Session) -> None:
+    # A wrong-sign import (income row stored negative) must not produce a negative link
+    # value (ECharts rejects it) nor understate period_income.
+    bank = BankFactory.create()
+    TransactionFactory.create(bank=bank, type="income", amount=Decimal("-500.00"))
+
+    payload = svc.build_sankey(db, DATE_FROM, DATE_TO, _no_suggestions())
+
+    income_links = [link for link in payload.links if link.target == svc.EXPENSES_NODE_ID]
+    assert income_links and all(link.value > 0 for link in income_links)
+    assert payload.period_income == 500.0
+
+
+def test_zero_sum_direct_branch_has_no_orphan_node(db: Session) -> None:
+    # A branch category whose own direct transactions sum to zero must not emit a
+    # synthetic `_direct` node, which would otherwise dangle with no connecting link.
+    bank = BankFactory.create()
+    parent = CategoryFactory.create(name="Food")
+    child = CategoryFactory.create(name="Restaurants", parent_id=parent.id)
+    # Child has a real expense → parent becomes a visible branch node.
+    tx_child = TransactionFactory.create(bank=bank, type="expense", amount=Decimal("-30.00"))
+    MappingFactory.create(transaction=tx_child, category=child)
+    # Parent's own direct transaction sums to zero.
+    tx_parent = TransactionFactory.create(bank=bank, type="expense", amount=Decimal("0.00"))
+    MappingFactory.create(transaction=tx_parent, category=parent)
+
+    payload = svc.build_sankey(db, DATE_FROM, DATE_TO, _no_suggestions())
+
+    assert _node(payload.nodes, f"cat_{parent.id}_direct") is None
+    # Every node must be referenced by at least one link (no orphans).
+    referenced = {link.source for link in payload.links} | {link.target for link in payload.links}
+    assert all(node.id in referenced for node in payload.nodes)

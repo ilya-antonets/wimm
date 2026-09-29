@@ -903,6 +903,7 @@
   
   ```python
   from datetime import date
+  from decimal import Decimal
   from sqlalchemy.orm import Session
   from app.schemas.sankey import SankeyPayload, SankeyNode, SankeyLink
   
@@ -941,10 +942,12 @@
       db: Session,
       date_from: date,
       date_to: date,
-  ) -> tuple[list[SankeyNode], list[SankeyLink], float]:
+  ) -> tuple[list[SankeyNode], list[SankeyLink], Decimal]:
       """
       Queries income transactions in period. Returns nodes, links to EXPENSES node,
-      and total income sum.
+      and total income sum (Decimal; converted to float at the payload boundary).
+      Link values use abs(amount) defensively so a wrong-sign import cannot yield a
+      negative link value or understate total income.
       """
   
   def _expense_nodes_and_links(
@@ -952,27 +955,30 @@
       date_from: date,
       date_to: date,
       suggester: MLSuggester,
-      existing_category_ids: set[int],
-  ) -> tuple[list[SankeyNode], list[SankeyLink], float]:
+  ) -> tuple[list[SankeyNode], list[SankeyLink], Decimal]:
       """
-      1. Queries all expense transactions in period with their explicit mapping (LEFT JOIN).
-      2. Collects unmapped transaction IDs; calls suggester.suggest() to get ML-implied
-         category_id for each. Validates each ML-returned category_id against
-         existing_category_ids; falls back to UNCATEGORIZED_ID if not found.
-      3. Merges explicit and ML-implied category assignments.
-      4. Uses recursive CTE to aggregate totals per category.
-      5. Builds category nodes (only for categories with amount > 0 in period).
-      Returns nodes, links from EXPENSES node to category nodes, and total expenses sum.
+      1. Loads all categories into an in-memory cat_map (id -> Category).
+      2. Queries all expense transactions in period with their explicit mapping (LEFT JOIN).
+      3. Collects unmapped transaction IDs; calls suggester.suggest() to get ML-implied
+         category_id for each. Validates each ML-returned category_id against cat_map;
+         falls back to UNCATEGORIZED_ID if not found (or below confidence threshold).
+      4. Merges explicit and ML-implied category assignments.
+      5. Aggregates absolute totals per category and rolls them up the parent chain in
+         Python via cat_map (no recursive CTE), marking every ancestor visible.
+      6. Builds a node per visible category (those with a direct amount plus their
+         ancestors). A branch category that also carries its own direct expenses gets a
+         synthetic `cat_{id}_direct` child so inflow = outflow.
+      Returns category nodes, links, and total expenses sum (Decimal). Does NOT create
+      the EXPENSES hub node — that is owned by build_sankey (see Step 10).
       """
   
   def _balance_node_and_link(
-      income: float,
-      expenses: float,
+      balance: Decimal,
   ) -> tuple[SankeyNode | None, SankeyLink | None]:
       """
-      If income > expenses: creates Proficit node; link from EXPENSES node (source=EXPENSES_NODE_ID).
-      If expenses > income: creates Deficit node; link from DEFICIT node (source=DEFICIT_NODE_ID, target=EXPENSES_NODE_ID).
-      If equal: returns (None, None).
+      If balance > 0: creates Proficit node; link from EXPENSES node (source=EXPENSES_NODE_ID).
+      If balance < 0: creates Deficit node; link from DEFICIT node (source=DEFICIT_NODE_ID, target=EXPENSES_NODE_ID).
+      If balance == 0: returns (None, None).
       """
   ```
   
@@ -2048,7 +2054,7 @@
                     AND date BETWEEN date_from AND date_to
                   ORDER BY date, id
   
-    total_income = SUM(row.amount for row in income_rows)   # all positive
+    total_income = SUM(ABS(row.amount) for row in income_rows)   # abs() guards wrong-sign imports
   
     ── Step 2: Build income nodes + links to EXPENSES node ────────────────────
     income_nodes = []
@@ -2063,7 +2069,7 @@
       income_links.append(SankeyLink(
         source = node_id,
         target = EXPENSES_NODE_ID,
-        value  = float(row.amount),
+        value  = float(ABS(row.amount)),   # abs(): link values must stay positive for ECharts
       ))
   
     ── Step 3: Load category metadata ─────────────────────────────────────────
@@ -2161,10 +2167,21 @@
     FOR tx_id, cat_id IN mapped_by_tx.items():
       direct_tx_ids_by_cat[cat_id].append(tx_id)
   
-    # A category node has children if any other visible node references it as parent.
-    nodes_with_children = {cat_map[c].parent_id for c in visible_ids if cat_map[c].parent_id in visible_ids}
+    # A category node has children if it is referenced as a parent. Step 6 marks every
+    # ancestor visible, so any non-NULL parent is already in visible_ids.
+    nodes_with_children = {cat_map[c].parent_id for c in visible_ids if cat_map[c].parent_id IS NOT NULL}
   
-    expense_nodes = [SankeyNode(id=EXPENSES_NODE_ID, name="Expenses")]
+    # Branch categories that carry their own direct expenses get a synthetic child node.
+    # Gate on a positive rolled-up total (raw_totals > 0), NOT on transaction count: a
+    # branch whose direct transactions sum to zero must not emit a node with no link.
+    direct_node_cat_ids = {
+      cat_id FOR cat_id IN visible_ids
+      IF cat_id IN nodes_with_children AND raw_totals.get(cat_id, 0) > 0
+    }
+  
+    # NOTE: the EXPENSES hub node is created by build_sankey during Step 10 assembly,
+    # not here — _expense_nodes_and_links returns only category nodes.
+    expense_nodes = []
   
     FOR cat_id IN visible_ids:
       cat = cat_map[cat_id]
@@ -2175,7 +2192,7 @@
       ))
       # If this branch node also has directly-mapped transactions, emit a synthetic
       # child node so the Sankey stays balanced (inflow = outflow for every node).
-      IF cat_id IN nodes_with_children AND direct_tx_ids_by_cat.get(cat_id):
+      IF cat_id IN direct_node_cat_ids:
         expense_nodes.append(SankeyNode(
           id              = f"cat_{cat_id}_direct",
           name            = f"{cat.name} (direct)",
@@ -2202,7 +2219,7 @@
       ))
       # Emit a link for any directly-mapped transactions on a branch node.
       # Without this the branch node inflow > outflow, breaking ECharts.
-      IF cat_id IN nodes_with_children AND raw_totals.get(cat_id, 0) > 0:
+      IF cat_id IN direct_node_cat_ids:
         expense_links.append(SankeyLink(
           source = f"cat_{cat_id}",
           target = f"cat_{cat_id}_direct",
@@ -2240,7 +2257,9 @@
       )
   
     ── Step 10: Assemble final payload ─────────────────────────────────────────
-    all_nodes = income_nodes + expense_nodes
+    # build_sankey owns the EXPENSES hub node so it is present in the income-only
+    # case too (income flows straight to Proficit when there are no expenses).
+    all_nodes = income_nodes + [SankeyNode(id=EXPENSES_NODE_ID, name="Expenses")] + expense_nodes
     all_links = income_links + expense_links
   
     IF balance_node:
