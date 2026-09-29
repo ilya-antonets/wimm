@@ -10,6 +10,7 @@ from app.database import get_db
 from app.exceptions import NotFoundError, ValidationError
 from app.models import Mapping, Transaction
 from app.schemas.transactions import TransactionPage, TransactionRead
+from app.services.ml_suggester import get_suggester
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -95,4 +96,7 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db)) -> Re
         raise NotFoundError(f"Transaction {transaction_id} not found")
     db.delete(tx)
     db.commit()
+    # Deleting a transaction cascade-deletes its mapping, shrinking the ML
+    # training corpus — invalidate so the next suggestion call re-fits.
+    get_suggester().invalidate()
     return Response(status_code=204)

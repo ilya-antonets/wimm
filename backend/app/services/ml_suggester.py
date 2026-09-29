@@ -63,9 +63,21 @@ class MLSuggester:
             descriptions = [str(r[0]) for r in rows]
             labels = [int(r[1]) for r in rows]
 
-            self._exact_cache = {
-                _normalize(desc): cat_id for desc, cat_id in zip(descriptions, labels, strict=True)
-            }
+            # Build the exact-match cache. Skip keys that carry no payee signal
+            # (empty after normalization) and drop keys that map to conflicting
+            # categories — an ambiguous payee must not yield a confidence-1.0 hit.
+            exact_cache: dict[str, int] = {}
+            ambiguous: set[str] = set()
+            for desc, cat_id in zip(descriptions, labels, strict=True):
+                key = _normalize(desc)
+                if not key or key in ambiguous:
+                    continue
+                if key in exact_cache and exact_cache[key] != cat_id:
+                    del exact_cache[key]
+                    ambiguous.add(key)
+                    continue
+                exact_cache[key] = cat_id
+            self._exact_cache = exact_cache
 
             vectorizer = TfidfVectorizer(
                 analyzer="word",
@@ -78,33 +90,59 @@ class MLSuggester:
             self._train_labels = labels
             self._cache_valid = True
 
-    def suggest(self, db: Session, transaction_ids: list[int]) -> list[SuggestionResult]:
+    def suggest(
+        self,
+        db: Session,
+        transaction_ids: list[int],
+        tx_by_id: dict[int, Transaction] | None = None,
+    ) -> list[SuggestionResult]:
         if not self._cache_valid:
             self._rebuild_cache(db)
 
-        transactions = db.scalars(
-            select(Transaction).where(Transaction.id.in_(transaction_ids))
-        ).all()
-        tx_by_id = {tx.id: tx for tx in transactions}
+        # Snapshot the model state atomically so a concurrent _rebuild_cache
+        # cannot swap these fields out from under us mid-suggestion.
+        with self._lock:
+            vectorizer = self._vectorizer
+            matrix = self._train_matrix
+            labels = self._train_labels
+            exact_cache = self._exact_cache
+
+        if matrix is None or vectorizer is None:
+            return []
+
+        if tx_by_id is None:
+            transactions = db.scalars(
+                select(Transaction).where(Transaction.id.in_(transaction_ids))
+            ).all()
+            tx_by_id = {tx.id: tx for tx in transactions}
 
         results: list[SuggestionResult] = []
+        seen: set[int] = set()
         for tx_id in transaction_ids:
+            if tx_id in seen:
+                continue
+            seen.add(tx_id)
             tx = tx_by_id.get(tx_id)
             if tx is None:
                 continue
-            result = self._suggest_one(db, tx)
+            result = self._suggest_one(db, tx, vectorizer, matrix, labels, exact_cache)
             if result is not None:
                 results.append(result)
         return results
 
-    def _suggest_one(self, db: Session, tx: Transaction) -> SuggestionResult | None:
-        if self._train_matrix is None or self._vectorizer is None:
-            return None
-
+    def _suggest_one(
+        self,
+        db: Session,
+        tx: Transaction,
+        vectorizer: Any,
+        matrix: Any,
+        labels: list[int],
+        exact_cache: dict[str, int],
+    ) -> SuggestionResult | None:
         normalized = _normalize(tx.description)
 
         # Phase 1 — exact payee match.
-        exact_category = self._exact_cache.get(normalized)
+        exact_category = exact_cache.get(normalized)
         if exact_category is not None:
             name = self._category_name(db, exact_category)
             if name is None:
@@ -118,12 +156,12 @@ class MLSuggester:
             )
 
         # Phase 2 — TF-IDF cosine similarity.
-        query_vec = self._vectorizer.transform([tx.description])
-        sims = cosine_similarity(query_vec, self._train_matrix)[0]
+        query_vec = vectorizer.transform([tx.description])
+        sims = cosine_similarity(query_vec, matrix)[0]
         k = min(settings.ml_top_k, len(sims))
         top_idx = sorted(range(len(sims)), key=lambda i: float(sims[i]), reverse=True)[:k]
         top_scores = [float(sims[i]) for i in top_idx]
-        top_categories = [self._train_labels[i] for i in top_idx]
+        top_categories = [labels[i] for i in top_idx]
 
         max_score = top_scores[0]
         if max_score <= 0.0:

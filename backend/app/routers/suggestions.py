@@ -29,4 +29,4 @@ def suggest_categories(
     if income:
         raise ValidationError(f"Cannot suggest categories for income transactions: {income}")
 
-    return get_suggester().suggest(db, body.transaction_ids)
+    return get_suggester().suggest(db, body.transaction_ids, found)

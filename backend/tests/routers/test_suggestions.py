@@ -55,6 +55,29 @@ def test_income_transaction_rejected(client: TestClient) -> None:
     assert response.status_code == 400
 
 
+def test_duplicate_ids_deduped(client: TestClient) -> None:
+    bank = BankFactory.create()
+    groceries = CategoryFactory.create(name="Groceries")
+    for desc in (
+        "walmart grocery store",
+        "target grocery market",
+        "aldi grocery run",
+        "costco grocery haul",
+        "kroger grocery trip",
+    ):
+        tx = TransactionFactory.create(bank=bank, type="expense", description=desc)
+        MappingFactory.create(transaction=tx, category=groceries)
+
+    query = TransactionFactory.create(
+        bank=bank, type="expense", description="walmart grocery purchase"
+    )
+    response = client.post("/api/suggestions", json={"transaction_ids": [query.id, query.id]})
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 1
+    assert results[0]["transaction_id"] == query.id
+
+
 def test_missing_transaction(client: TestClient) -> None:
     response = client.post("/api/suggestions", json={"transaction_ids": [9999]})
     assert response.status_code == 404

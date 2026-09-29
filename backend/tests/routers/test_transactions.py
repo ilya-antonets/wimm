@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
+from pytest_mock import MockerFixture
 from sqlalchemy.orm import Session
 
 from app.models import Mapping, Transaction
@@ -240,3 +241,16 @@ def test_delete_cascades_mapping(client: TestClient, db: Session) -> None:
 def test_delete_not_found(client: TestClient) -> None:
     response = client.delete("/api/transactions/9999")
     assert response.status_code == 404
+
+
+def test_delete_transaction_invalidates_ml_cache(client: TestClient, mocker: MockerFixture) -> None:
+    bank = BankFactory.create()
+    cat = CategoryFactory.create()
+    tx = TransactionFactory.create(bank=bank, type="expense")
+    MappingFactory.create(transaction=tx, category=cat)
+    mock_suggester = mocker.MagicMock()
+    mocker.patch("app.routers.transactions.get_suggester", return_value=mock_suggester)
+
+    response = client.delete(f"/api/transactions/{tx.id}")
+    assert response.status_code == 204
+    mock_suggester.invalidate.assert_called_once()

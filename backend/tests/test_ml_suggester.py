@@ -142,3 +142,32 @@ def test_below_min_confidence_still_returned(db: Session) -> None:
     assert len(results) == 1
     assert results[0].method == "tfidf"
     assert 0.0 < results[0].confidence < 0.3  # below ml_min_confidence, still returned
+
+
+def test_empty_normalized_description_no_exact_match(db: Session) -> None:
+    category = CategoryFactory.create(name="Numeric")
+    # Descriptions with no A-Z letters all normalize to "" — they must not
+    # collapse into a single spurious exact-match key.
+    for desc in ("12345", "678 90", "***", "111", "222"):
+        _seed_mapping(db, desc, category)
+
+    query = _unmapped(db, "999")
+    results = MLSuggester().suggest(db, [query.id])
+
+    assert all(r.method != "exact" for r in results)
+
+
+def test_ambiguous_exact_key_not_matched(db: Session) -> None:
+    shopping = CategoryFactory.create(name="Shopping")
+    subscriptions = CategoryFactory.create(name="Subscriptions")
+    # Same normalized payee mapped to two different categories → ambiguous.
+    _seed_mapping(db, "AMAZON", shopping)
+    _seed_mapping(db, "AMAZON", subscriptions)
+    for desc in ("grocery market weekly", "gas station fuel", "pharmacy prescription"):
+        _seed_mapping(db, desc, shopping)
+
+    query = _unmapped(db, "amazon")
+    results = MLSuggester().suggest(db, [query.id])
+
+    # The ambiguous payee must not produce a confidence-1.0 exact match.
+    assert all(r.method != "exact" for r in results)
