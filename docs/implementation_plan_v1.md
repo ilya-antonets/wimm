@@ -193,14 +193,15 @@ MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns 
 
 ### Files created
 - `backend/app/schemas/transactions.py` — `MappingInfo`, `TransactionRead` (includes `bank_name`, embedded `mapping: MappingInfo | None`), `TransactionPage`
-- `backend/app/routers/transactions.py` — `GET /api/transactions` (query params: `date_from`, `date_to`, `type`, `bank_id`, `category_id`, `unmapped`, `search`, `ids` comma-separated, `page` ge=1, `page_size` ge=1 le=200); `DELETE /api/transactions/{id}` (204/404, cascade deletes mapping)
+- `backend/app/routers/transactions.py` — `GET /api/transactions` (query params: `date_from`, `date_to`, `type`, `bank_id`, `category_id`, `unmapped`, `search`, `ids` comma-separated, `page` ge=1, `page_size` ge=1 le=200); `DELETE /api/transactions/{id}` (204/404, cascade deletes mapping). `ids`-mode returns the complete requested set **unpaginated** (`pages=1`); an empty/whitespace-only `ids` param falls through to the normal filters. `search` escapes LIKE metacharacters (`%`, `_`, `\`) so they match literally.
 - `backend/tests/routers/test_transactions.py`
 
 ### Modified
 - `backend/app/main.py` — register `transactions.router`
+- `backend/app/models.py` — add `Mapping.category_name` property (flattened for `MappingInfo` serialization)
 
-### Tests (11 cases)
-- Empty list, filter by type, filter by date range, unmapped filter, search substring, `ids=` bulk fetch, pagination slice, `page_size` upper bound (422), delete transaction, delete cascades mapping, delete not found (404)
+### Tests (18 cases)
+- Empty list, filter by type, filter by date range, filter by bank_id, filter by category_id, unmapped filter, search substring, search escapes wildcards, `ids=` bulk fetch, `ids=` bulk fetch beyond page_size, invalid `ids` (400), empty `ids` falls through to filters, pagination slice, `page_size` upper bound (422), mapping embedded, delete transaction, delete cascades mapping, delete not found (404)
 
 ---
 

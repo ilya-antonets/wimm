@@ -46,8 +46,11 @@ def list_transactions(
         joinedload(Transaction.mapping).joinedload(Mapping.category),
     )
 
-    if ids is not None:
-        stmt = stmt.where(Transaction.id.in_(_parse_ids(ids)))
+    # Only treat ids as a bulk-fetch filter when it parses to a non-empty list;
+    # an empty/whitespace-only `ids` param falls through to the normal filters.
+    id_filter = _parse_ids(ids) if ids is not None else None
+    if id_filter:
+        stmt = stmt.where(Transaction.id.in_(id_filter))
     else:
         if date_from is not None:
             stmt = stmt.where(Transaction.date >= date_from)
@@ -62,15 +65,18 @@ def list_transactions(
         if unmapped:
             stmt = stmt.where(~Transaction.mapping.has(), Transaction.type == "expense")
         if search is not None:
-            stmt = stmt.where(Transaction.description.ilike(f"%{search}%"))
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            stmt = stmt.where(Transaction.description.ilike(f"%{escaped}%", escape="\\"))
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
-    stmt = (
-        stmt.order_by(Transaction.date.desc(), Transaction.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
+    stmt = stmt.order_by(Transaction.date.desc(), Transaction.id.desc())
+    if id_filter:
+        # Bulk fetch returns the complete requested set, unpaginated.
+        pages = 1
+    else:
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        pages = ceil(total / page_size)
     items = list(db.scalars(stmt).unique())
 
     return TransactionPage(
@@ -78,7 +84,7 @@ def list_transactions(
         total=total,
         page=page,
         page_size=page_size,
-        pages=ceil(total / page_size),
+        pages=pages,
     )
 
 
