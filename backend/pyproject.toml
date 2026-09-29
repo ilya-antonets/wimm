@@ -16,7 +16,7 @@ ignore = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=app --cov-fail-under=60"
+addopts = "--cov=app --cov-fail-under=85"
 
 [tool.coverage.run]
 source = ["app"]

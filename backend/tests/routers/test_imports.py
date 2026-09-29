@@ -80,3 +80,13 @@ def test_upload_triggers_ml_invalidation(
     )
     assert response.status_code == 201
     mock_suggester.invalidate.assert_called_once()
+
+
+def test_upload_wrong_extension_returns_400(client: TestClient, db: Session) -> None:
+    bank = BankFactory.create()
+    response = client.post(
+        "/api/import",
+        data={"bank_id": str(bank.id)},
+        files={"file": ("statements.xlsx", _SIMPLE_CSV, "application/vnd.ms-excel")},
+    )
+    assert response.status_code == 400

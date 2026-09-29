@@ -104,6 +104,9 @@ def delete_category(db: Session, category_id: int, suggester: MLSuggester) -> No
     )
 
     for cat_id in subtree_ids:
+        # Individual DELETEs in deepest-first order are required: the RESTRICT FK on
+        # parent_id prevents deleting a parent before its children, so a single bulk
+        # DELETE WHERE id IN (...) would violate the constraint on the first deleted row.
         db.execute(delete(Category).where(Category.id == cat_id))
 
     db.commit()

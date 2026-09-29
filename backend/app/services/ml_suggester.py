@@ -116,6 +116,15 @@ class MLSuggester:
             ).all()
             tx_by_id = {tx.id: tx for tx in transactions}
 
+        # Pre-load all category names in one query to avoid N+1 DB lookups per suggestion.
+        cat_ids_needed: set[int] = set(exact_cache.values())
+        if labels:
+            cat_ids_needed.update(labels)
+        cat_names: dict[int, str] = {}
+        if cat_ids_needed:
+            for cat in db.scalars(select(Category).where(Category.id.in_(cat_ids_needed))):
+                cat_names[cat.id] = cat.name
+
         results: list[SuggestionResult] = []
         seen: set[int] = set()
         for tx_id in transaction_ids:
@@ -125,26 +134,26 @@ class MLSuggester:
             tx = tx_by_id.get(tx_id)
             if tx is None:
                 continue
-            result = self._suggest_one(db, tx, vectorizer, matrix, labels, exact_cache)
+            result = self._suggest_one(tx, vectorizer, matrix, labels, exact_cache, cat_names)
             if result is not None:
                 results.append(result)
         return results
 
     def _suggest_one(
         self,
-        db: Session,
         tx: Transaction,
         vectorizer: Any,
         matrix: Any,
         labels: list[int],
         exact_cache: dict[str, int],
+        cat_names: dict[int, str],
     ) -> SuggestionResult | None:
         normalized = _normalize(tx.description)
 
         # Phase 1 — exact payee match.
         exact_category = exact_cache.get(normalized)
         if exact_category is not None:
-            name = self._category_name(db, exact_category)
+            name = cat_names.get(exact_category)
             if name is None:
                 return None
             return SuggestionResult(
@@ -174,7 +183,7 @@ class MLSuggester:
         else:
             confidence = max_score
 
-        name = self._category_name(db, category_id)
+        name = cat_names.get(category_id)
         if name is None:
             return None
         return SuggestionResult(
@@ -184,10 +193,6 @@ class MLSuggester:
             confidence=confidence,
             method="tfidf",
         )
-
-    def _category_name(self, db: Session, category_id: int) -> str | None:
-        category = db.get(Category, category_id)
-        return category.name if category is not None else None
 
 
 _suggester: MLSuggester | None = None
