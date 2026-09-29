@@ -249,13 +249,14 @@ The `MLSuggester` stub from Stage 3 gains its full implementation.
 ---
 
 ## Stage 8 — Frontend Foundation
-**PR:** `feat(frontend): Vite scaffold, TypeScript types, API client, Zustand store, layout shell, test infrastructure`
+**Status: COMPLETED**
+**PR:** #13 — `feat(frontend): Vite scaffold, TypeScript types, API client, Zustand store, layout shell, test infrastructure`
 
 CI frontend job activates for the first time.
 
 ### Files created
 - `frontend/package.json` — react 18, react-router-dom, axios, echarts, echarts-for-react, react-arborist, @tanstack/react-table, @tanstack/react-query, zustand, react-hot-toast; dev: typescript, vite, vitest, jsdom, @testing-library/react+user-event+jest-dom, msw, eslint 9 flat config, prettier
-- `frontend/tsconfig.json` — strict, noUnusedLocals, noUnusedParameters, noFallthroughCasesInSwitch, noUncheckedIndexedAccess, skipLibCheck: false
+- `frontend/tsconfig.json` — strict, noUnusedLocals, noUnusedParameters, noFallthroughCasesInSwitch, noUncheckedIndexedAccess, skipLibCheck: true (react-hot-toast transitive .d.ts requires this)
 - `frontend/vite.config.ts` — vitest: jsdom, setupFiles, globals, coverage v8 with `thresholds: { lines: 75, functions: 75 }`
 - `frontend/.prettierrc` — printWidth: 100, double quotes, trailingComma: "es5"
 - `frontend/eslint.config.js` — flat config with typescript-eslint, react, react-hooks, import plugins

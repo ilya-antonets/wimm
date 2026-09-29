@@ -16,13 +16,27 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
 uvicorn app.main:app --reload
 
-# Frontend (once frontend/ exists)
+# Frontend
 cd frontend
-npm install
-npm run dev
+npm install            # installs deps and generates package-lock.json
+npm run dev            # Vite dev server on http://localhost:5173
 
 # Run all checks locally
 bash scripts/check.sh
+```
+
+The frontend dev server proxies API calls to the backend at `http://localhost:8000/api`
+by default. Override with `VITE_API_BASE_URL` (e.g. in `frontend/.env.local`). Log
+verbosity is controlled by `VITE_LOG_LEVEL` (`debug`/`info`/`warn`/`error`).
+
+### Frontend checks
+
+```bash
+cd frontend
+npm run typecheck      # tsc --noEmit (strict)
+npm run lint           # ESLint (flat config)
+npm run format:check   # Prettier
+npm test -- --run      # Vitest
 ```
 
 ---
