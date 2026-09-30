@@ -19,7 +19,14 @@ export function ConfirmDialog({
 }: ConfirmDialogProps): JSX.Element | null {
   if (!open) return null;
   return (
-    <div className="dialog-backdrop" role="presentation" onClick={onCancel}>
+    <div
+      className="dialog-backdrop"
+      role="presentation"
+      onClick={(e) => {
+        e.stopPropagation();
+        onCancel();
+      }}
+    >
       <div
         className="dialog"
         role="alertdialog"

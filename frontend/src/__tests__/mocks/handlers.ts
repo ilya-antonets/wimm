@@ -2,6 +2,7 @@ import { http, HttpResponse } from "msw";
 
 import type { BankRead } from "../../types/bank";
 import type { CategoryRead } from "../../types/category";
+import type { ImportResult } from "../../types/imports";
 import type { SankeyPayload } from "../../types/sankey";
 import type { TransactionPage, TransactionRead } from "../../types/transaction";
 
@@ -48,6 +49,15 @@ const mockSankey: SankeyPayload = {
 
 export const handlers = [
   http.get(`${API}/banks`, () => HttpResponse.json(mockBanks)),
+  http.post(`${API}/banks`, async ({ request }) => {
+    const body = (await request.json()) as Omit<BankRead, "id">;
+    return HttpResponse.json({ id: 2, ...body }, { status: 201 });
+  }),
+  http.put(`${API}/banks/:id`, async ({ request, params }) => {
+    const body = (await request.json()) as Omit<BankRead, "id">;
+    return HttpResponse.json({ id: Number(params.id), ...body });
+  }),
+  http.delete(`${API}/banks/:id`, () => new HttpResponse(null, { status: 204 })),
   http.get(`${API}/categories`, () => HttpResponse.json(mockCategories)),
   http.get(`${API}/transactions`, () => {
     const page: TransactionPage = {
@@ -62,5 +72,15 @@ export const handlers = [
   http.post(`${API}/mappings`, () =>
     HttpResponse.json({ id: 1, transaction_id: 1, category_id: 2 }, { status: 201 })
   ),
+  http.post(`${API}/import`, () => {
+    const result: ImportResult = {
+      import_batch_id: 1,
+      total_rows_parsed: 20,
+      new_transactions: 12,
+      duplicate_transactions: 8,
+      failed_rows: [],
+    };
+    return HttpResponse.json(result, { status: 201 });
+  }),
   http.get(`${API}/sankey`, () => HttpResponse.json(mockSankey)),
 ];
