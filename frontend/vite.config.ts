@@ -26,6 +26,11 @@ export default defineConfig({
       thresholds: {
         lines: 75,
         functions: 75,
+        // The plan targets ≥85% for the data-fetching hooks specifically.
+        "src/hooks/**": {
+          lines: 85,
+          functions: 85,
+        },
       },
     },
   },

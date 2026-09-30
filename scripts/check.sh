@@ -18,7 +18,7 @@ run_backend() {
 run_frontend() {
     if [ -d frontend ]; then
         echo "=== Frontend checks ==="
-        (cd frontend && npm run lint && npm run typecheck && npm run format:check && npm test -- --run)
+        (cd frontend && npm run lint && npm run typecheck && npm run format:check && npm run test:coverage)
     fi
 }
 

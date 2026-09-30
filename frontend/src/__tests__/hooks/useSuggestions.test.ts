@@ -21,4 +21,12 @@ describe("useSuggestions", () => {
     expect(result.current.isLoading).toBe(false);
     expect(result.current.suggestions.size).toBe(0);
   });
+
+  it("refetch re-runs the query", async () => {
+    const { result } = renderHookWithQuery(() => useSuggestions([1]));
+    await waitFor(() => expect(result.current.suggestions.size).toBe(1));
+
+    result.current.refetch();
+    await waitFor(() => expect(result.current.suggestions.get(1)?.transaction_id).toBe(1));
+  });
 });

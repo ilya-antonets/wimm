@@ -36,7 +36,9 @@ describe("TransactionTable", () => {
       await screen.findByText("Groceries", { selector: ".suggestion-badge__name" })
     ).toBeInTheDocument();
     expect(screen.getByText("92%")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Accept" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Accept suggestion for GROCERY STORE" })
+    ).toBeInTheDocument();
   });
 
   it("calls the mapping API when a category is selected", async () => {

@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Tree, type NodeRendererProps } from "react-arborist";
 
 import type { CategoryRead } from "../../types";
@@ -69,6 +70,11 @@ export function CategoryTree({
 }: CategoryTreeProps): JSX.Element {
   const data = buildTree(categories);
 
+  // Set when a rename is settled via Enter/Escape so the input's subsequent
+  // blur (fired as it unmounts) doesn't re-submit — Enter would double-commit,
+  // Escape would resurrect the discarded value.
+  const suppressBlurCommitRef = useRef(false);
+
   const Node = ({ node, style, dragHandle }: NodeRendererProps<TreeNode>): JSX.Element => {
     const id = Number(node.id);
     const isProtected = id === UNCATEGORIZED_ID;
@@ -95,13 +101,27 @@ export function CategoryTree({
         {node.isEditing ? (
           <input
             className="category-tree__rename-input"
-            aria-label={`Rename ${node.data.name}`}
+            aria-label={`New name for ${node.data.name}`}
             autoFocus
             defaultValue={node.data.name}
-            onBlur={() => node.reset()}
+            onBlur={(e) => {
+              // Clicking away commits the typed value; Enter/Escape already
+              // settled it and set the suppress flag.
+              if (suppressBlurCommitRef.current) {
+                suppressBlurCommitRef.current = false;
+                return;
+              }
+              node.submit(e.currentTarget.value);
+            }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") node.submit(e.currentTarget.value);
-              if (e.key === "Escape") node.reset();
+              if (e.key === "Enter") {
+                suppressBlurCommitRef.current = true;
+                node.submit(e.currentTarget.value);
+              }
+              if (e.key === "Escape") {
+                suppressBlurCommitRef.current = true;
+                node.reset();
+              }
             }}
           />
         ) : (

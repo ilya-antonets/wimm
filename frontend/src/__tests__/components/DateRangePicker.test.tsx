@@ -30,4 +30,27 @@ describe("DateRangePicker", () => {
     expect(useAppStore.getState().dateRange).toEqual({ from: "2026-09-01", to: "2026-10-31" });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("commits a first-of-month range and clears errors when 'This Month' is clicked", () => {
+    render(<DateRangePicker />);
+
+    // Trigger an error first so we can confirm the preset clears it.
+    fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-10-15" } });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "This Month" }));
+
+    expect(useAppStore.getState().dateRange.from).toMatch(/-01$/);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("commits an ordered range when 'Last Month' is clicked", () => {
+    render(<DateRangePicker />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Last Month" }));
+
+    const { from, to } = useAppStore.getState().dateRange;
+    expect(from <= to).toBe(true);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
