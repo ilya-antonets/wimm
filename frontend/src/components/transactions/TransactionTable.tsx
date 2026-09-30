@@ -79,6 +79,16 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
   const { categories } = useCategoryTree();
   const { createOrUpdateMapping, deleteMapping } = useMappings();
 
+  // If the result set shrinks below the current page without a filter change
+  // (e.g. accepting a mapping while "Unmapped only" is on), snap back into range
+  // so the user isn't stranded on an empty page past the last one. When the set
+  // empties completely (pages === 0) fall back to page 1.
+  useEffect(() => {
+    if (!data) return;
+    const lastPage = Math.max(data.pages, 1);
+    if (page > lastPage) setPage(lastPage);
+  }, [data, page]);
+
   const items = useMemo(() => data?.items ?? [], [data]);
 
   // Fetch suggestions only for the unmapped expenses on the current page.
@@ -162,6 +172,7 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
               </span>
               <button
                 type="button"
+                aria-label={`Accept suggestion for ${tx.description}`}
                 onClick={() =>
                   createOrUpdateMapping.mutate({
                     transaction_id: tx.id,
@@ -187,7 +198,7 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
     pageCount: data?.pages ?? -1,
   });
 
-  const totalPages = data?.pages ?? 1;
+  const totalPages = Math.max(data?.pages ?? 1, 1);
 
   return (
     <div className="transaction-table">

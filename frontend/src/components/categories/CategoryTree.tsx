@@ -1,4 +1,5 @@
-import { Tree, type NodeRendererProps } from "react-arborist";
+import { useRef } from "react";
+import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 
 import type { CategoryRead } from "../../types";
 
@@ -53,6 +54,47 @@ function buildTree(categories: CategoryRead[]): TreeNode[] {
 }
 
 /**
+ * Inline rename input for a single node. The commit latch lives here — scoped to
+ * one editing session's lifetime — so it can never leak into another node's rename:
+ * a fresh input always mounts un-committed. `commit` is idempotent, so the blur that
+ * fires as the input unmounts (after Enter/Escape) is a harmless no-op regardless of
+ * ordering, and if that blur never fires nothing is left in a stale state.
+ */
+function RenameInput({ node }: { node: NodeApi<TreeNode> }): JSX.Element {
+  const committedRef = useRef(false);
+
+  const commit = (raw: string): void => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    const name = raw.trim();
+    // Empty or unchanged → discard rather than submit an invalid/no-op rename.
+    if (name === "" || name === node.data.name) {
+      node.reset();
+      return;
+    }
+    node.submit(name);
+  };
+
+  return (
+    <input
+      className="category-tree__rename-input"
+      aria-label={`New name for ${node.data.name}`}
+      autoFocus
+      defaultValue={node.data.name}
+      onBlur={(e) => commit(e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          commit(e.currentTarget.value);
+        } else if (e.key === "Escape") {
+          committedRef.current = true;
+          node.reset();
+        }
+      }}
+    />
+  );
+}
+
+/**
  * Category hierarchy tree. Selection, inline rename (double-click or the Rename
  * action), per-node Add-child / Delete actions, and drag-to-reparent flow up to
  * the parent via callbacks. The Uncategorized node (id=1) exposes no
@@ -93,17 +135,7 @@ export function CategoryTree({
         )}
 
         {node.isEditing ? (
-          <input
-            className="category-tree__rename-input"
-            aria-label={`Rename ${node.data.name}`}
-            autoFocus
-            defaultValue={node.data.name}
-            onBlur={() => node.reset()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") node.submit(e.currentTarget.value);
-              if (e.key === "Escape") node.reset();
-            }}
-          />
+          <RenameInput node={node} />
         ) : (
           <span
             className={

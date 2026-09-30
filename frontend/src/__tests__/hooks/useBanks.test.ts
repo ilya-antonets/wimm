@@ -48,4 +48,52 @@ describe("useBanks", () => {
     expect(keys).toContain(JSON.stringify(["banks"]));
     expect(keys).toContain(JSON.stringify(["transactions"]));
   });
+
+  it("updateBank invalidates the banks query on success", async () => {
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const { result } = renderHookWithQuery(() => useBanks());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    result.current.updateBank.mutate({
+      id: 1,
+      name: "Renamed Bank",
+      column_map: { date: "Date", amount: "Amount", description: "Desc" },
+      date_format: "%Y-%m-%d",
+      encoding: "utf-8",
+      skip_header_rows: 0,
+      skip_footer_rows: 0,
+    });
+
+    await waitFor(() => expect(result.current.updateBank.isSuccess).toBe(true));
+    expect(result.current.updateBank.data?.name).toBe("Renamed Bank");
+    const keys = invalidateSpy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey));
+    expect(keys).toContain(JSON.stringify(["banks"]));
+  });
+
+  it("surfaces mutation errors through the onError toast handlers", async () => {
+    server.use(
+      http.post(`${API}/banks`, () => new HttpResponse(null, { status: 500 })),
+      http.put(`${API}/banks/:id`, () => new HttpResponse(null, { status: 500 })),
+      http.delete(`${API}/banks/:id`, () => new HttpResponse(null, { status: 500 }))
+    );
+    const { result } = renderHookWithQuery(() => useBanks());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    result.current.createBank.mutate({
+      name: "x",
+      column_map: { date: "d", amount: "a", description: "s" },
+      date_format: "%Y-%m-%d",
+    });
+    result.current.updateBank.mutate({
+      id: 1,
+      name: "x",
+      column_map: { date: "d", amount: "a", description: "s" },
+      date_format: "%Y-%m-%d",
+    });
+    result.current.deleteBank.mutate(1);
+
+    await waitFor(() => expect(result.current.createBank.isError).toBe(true));
+    await waitFor(() => expect(result.current.updateBank.isError).toBe(true));
+    await waitFor(() => expect(result.current.deleteBank.isError).toBe(true));
+  });
 });

@@ -89,6 +89,8 @@ export function SankeyDiagram({ dateFrom, dateTo }: SankeyDiagramProps): JSX.Ele
   }
 
   const handleNodeClick = (params: SankeyClickParams): void => {
+    // Edges fire the same `click` event; only nodes carry drill-down ids.
+    if (params.dataType === "edge") return;
     const node = payload.nodes.find((n) => n.id === params.name);
     if (node && node.transaction_ids && node.transaction_ids.length > 0) {
       openSankeyPanel(node.id, node.name, node.transaction_ids);
