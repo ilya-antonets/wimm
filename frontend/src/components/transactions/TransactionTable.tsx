@@ -81,11 +81,12 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
 
   // If the result set shrinks below the current page without a filter change
   // (e.g. accepting a mapping while "Unmapped only" is on), snap back into range
-  // so the user isn't stranded on an empty page past the last one.
+  // so the user isn't stranded on an empty page past the last one. When the set
+  // empties completely (pages === 0) fall back to page 1.
   useEffect(() => {
-    if (data && data.pages >= 1 && page > data.pages) {
-      setPage(data.pages);
-    }
+    if (!data) return;
+    const lastPage = Math.max(data.pages, 1);
+    if (page > lastPage) setPage(lastPage);
   }, [data, page]);
 
   const items = useMemo(() => data?.items ?? [], [data]);
@@ -197,7 +198,7 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
     pageCount: data?.pages ?? -1,
   });
 
-  const totalPages = data?.pages ?? 1;
+  const totalPages = Math.max(data?.pages ?? 1, 1);
 
   return (
     <div className="transaction-table">
