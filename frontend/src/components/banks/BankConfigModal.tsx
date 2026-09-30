@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import toast from "react-hot-toast";
 
-import { useBanks } from "../../hooks/useBanks";
+import { useBankMutations } from "../../hooks/useBanks";
 import { ConfirmDialog } from "../shared/ConfirmDialog";
 import type { BankRead, ColumnMap } from "../../types";
 
@@ -61,7 +62,7 @@ function parseColumn(value: string): string | number {
 }
 
 export function BankConfigModal({ bank, open, onClose }: BankConfigModalProps): JSX.Element | null {
-  const { createBank, updateBank, deleteBank } = useBanks();
+  const { createBank, updateBank, deleteBank } = useBankMutations();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -77,25 +78,45 @@ export function BankConfigModal({ bank, open, onClose }: BankConfigModalProps): 
   const set = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
 
+  // Preserve the loaded value's original type when the text is unchanged, so an
+  // all-digit column *name* (e.g. a header literally called "2024") is not
+  // silently reinterpreted as a 0-based index on save.
+  const resolveColumn = (
+    text: string,
+    original: string | number | null | undefined
+  ): string | number => {
+    if (original != null && String(original) === text.trim()) return original;
+    return parseColumn(text);
+  };
+
   const buildColumnMap = (): ColumnMap => {
+    const original = bank?.column_map;
     const map: ColumnMap = {
-      date: parseColumn(form.col_date),
-      amount: parseColumn(form.col_amount),
-      description: parseColumn(form.col_description),
+      date: resolveColumn(form.col_date, original?.date),
+      amount: resolveColumn(form.col_amount, original?.amount),
+      description: resolveColumn(form.col_description, original?.description),
     };
     if (form.col_transaction_id.trim() !== "") {
-      map.transaction_id = parseColumn(form.col_transaction_id);
+      map.transaction_id = resolveColumn(form.col_transaction_id, original?.transaction_id);
     }
     return map;
   };
 
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
+    const name = form.name.trim();
+    const date_format = form.date_format.trim();
+    const encoding = form.encoding.trim();
+    const requiredColumns = [form.col_date, form.col_amount, form.col_description];
+    if (!name || !date_format || !encoding || requiredColumns.some((c) => c.trim() === "")) {
+      toast.error("Please fill in all required fields.");
+      return;
+    }
     const payload = {
-      name: form.name.trim(),
+      name,
       column_map: buildColumnMap(),
-      date_format: form.date_format.trim(),
-      encoding: form.encoding.trim(),
+      date_format,
+      encoding,
       skip_header_rows: Number(form.skip_header_rows) || 0,
       skip_footer_rows: Number(form.skip_footer_rows) || 0,
     };

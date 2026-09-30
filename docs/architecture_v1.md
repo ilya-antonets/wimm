@@ -322,7 +322,7 @@ cd backend && uvicorn app.main:app --reload   # auto-reloads on save
 cd frontend && npm run dev                     # Vite HMR on localhost:5173
 ```
 
-Requires Python 3.12 and Node 20 installed locally.
+Requires Python 3.12 and Node 24 installed locally.
 
 ---
 

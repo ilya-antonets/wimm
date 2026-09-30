@@ -11,25 +11,27 @@ import type { BankCreate, BankRead, BankUpdate } from "../types";
 
 type UpdateBankVariables = { id: number } & BankUpdate;
 
-interface UseBanksReturn {
-  banks: BankRead[];
-  isLoading: boolean;
-  error: Error | null;
+interface BankMutations {
   createBank: UseMutationResult<BankRead, Error, BankCreate>;
   updateBank: UseMutationResult<BankRead, Error, UpdateBankVariables>;
   deleteBank: UseMutationResult<void, Error, number>;
 }
 
-/**
- * Banks query + mutations. The query key is `["banks"]`. Mutations invalidate
- * `["banks"]`; deleting a bank also invalidates `["transactions"]` since the
- * backend cascades linked rows (and a delete is only allowed once they are
- * gone, but the cache is refreshed defensively).
- */
-export function useBanks(): UseBanksReturn {
-  const queryClient = useQueryClient();
+interface UseBanksReturn extends BankMutations {
+  banks: BankRead[];
+  isLoading: boolean;
+  error: Error | null;
+}
 
-  const query = useQuery({ queryKey: ["banks"], queryFn: listBanks });
+/**
+ * Bank mutations without subscribing to the `["banks"]` query — for components
+ * that only write (e.g. BankConfigModal) and should not add a redundant query
+ * observer. Mutations invalidate `["banks"]`; deleting a bank also invalidates
+ * `["transactions"]` since the backend cascades linked rows (and a delete is
+ * only allowed once they are gone, but the cache is refreshed defensively).
+ */
+export function useBankMutations(): BankMutations {
+  const queryClient = useQueryClient();
 
   const createMutation = useMutation<BankRead, Error, BankCreate>({
     mutationFn: createBank,
@@ -60,11 +62,24 @@ export function useBanks(): UseBanksReturn {
   });
 
   return {
-    banks: query.data ?? [],
-    isLoading: query.isLoading,
-    error: query.error,
     createBank: createMutation,
     updateBank: updateMutation,
     deleteBank: deleteMutation,
+  };
+}
+
+/**
+ * Banks query + mutations. The query key is `["banks"]`. See
+ * {@link useBankMutations} for the write-only variant.
+ */
+export function useBanks(): UseBanksReturn {
+  const query = useQuery({ queryKey: ["banks"], queryFn: listBanks });
+  const mutations = useBankMutations();
+
+  return {
+    banks: query.data ?? [],
+    isLoading: query.isLoading,
+    error: query.error,
+    ...mutations,
   };
 }

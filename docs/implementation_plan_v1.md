@@ -71,7 +71,7 @@ backend:
           Install dependencies (if: hashFiles(requirements.txt) != '' && hashFiles(requirements-dev.txt) != ''),
           bash scripts/check.sh backend]
 frontend:
-  steps: [checkout (SHA-pinned), setup-node 20,
+  steps: [checkout (SHA-pinned), setup-node 24,
           Install dependencies (if: hashFiles(frontend/package.json) != ''),
           bash scripts/check.sh frontend]
 ```
@@ -276,7 +276,8 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 ---
 
 ## Stage 9 — Settings Page (Banks + Import UI)
-**PR:** `feat(frontend): BankConfigModal, ImportModal, SettingsPage with bank/import hooks`
+**Status: COMPLETED**
+**PR:** #14 — `feat(frontend): Settings page with bank CRUD and CSV import UI`
 
 ### Files created
 - `frontend/src/services/bankService.ts`, `importService.ts`
