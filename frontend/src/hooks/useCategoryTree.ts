@@ -32,9 +32,12 @@ interface UseCategoryTreeReturn extends CategoryMutations {
 }
 
 /**
- * Category mutations. All invalidate `["categories"]`; deleting a category also
- * invalidates `["transactions"]` and `["sankey"]` because the backend reassigns
- * the deleted subtree's mappings to Uncategorized, which changes both.
+ * Category mutations. All invalidate `["categories"]`. Renaming, moving, and
+ * deleting a category also invalidate `["transactions"]` and `["sankey"]`: a
+ * rename changes the label shown in transaction rows and Sankey nodes, a move
+ * reshapes the Sankey roll-up (which follows `parent_id`), and a delete
+ * reassigns the subtree's mappings to Uncategorized. Only create needs no
+ * downstream invalidation (a brand-new category has no transactions yet).
  */
 export function useCategoryMutations(): CategoryMutations {
   const queryClient = useQueryClient();
@@ -63,6 +66,8 @@ export function useCategoryMutations(): CategoryMutations {
     mutationFn: ({ id, ...payload }) => moveCategory(id, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["categories"] });
+      void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      void queryClient.invalidateQueries({ queryKey: ["sankey"] });
       toast.success("Category moved");
     },
     onError: (err) => toast.error(err.message),

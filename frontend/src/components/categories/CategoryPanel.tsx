@@ -18,8 +18,15 @@ interface PendingCreate {
  * `store.activeCategoryId` (which drives the transaction table's filter).
  */
 export function CategoryPanel(): JSX.Element {
-  const { categories, isLoading, createCategory, renameCategory, moveCategory, deleteCategory } =
-    useCategoryTree();
+  const {
+    categories,
+    isLoading,
+    error,
+    createCategory,
+    renameCategory,
+    moveCategory,
+    deleteCategory,
+  } = useCategoryTree();
   const activeCategoryId = useAppStore((s) => s.activeCategoryId);
   const setActiveCategoryId = useAppStore((s) => s.setActiveCategoryId);
 
@@ -81,6 +88,10 @@ export function CategoryPanel(): JSX.Element {
 
       {isLoading ? (
         <LoadingSpinner label="Loading categories…" />
+      ) : error ? (
+        <p role="alert" className="category-panel__error">
+          Failed to load categories: {error.message}
+        </p>
       ) : (
         <CategoryTree
           categories={categories}

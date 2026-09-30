@@ -74,7 +74,7 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
     pageSize,
   };
 
-  const { data, isLoading } = useTransactions(filters);
+  const { data, isLoading, error } = useTransactions(filters);
   const { banks } = useBanks();
   const { categories } = useCategoryTree();
   const { createOrUpdateMapping, deleteMapping } = useMappings();
@@ -235,6 +235,10 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
 
       {isLoading ? (
         <LoadingSpinner label="Loading transactions…" />
+      ) : error ? (
+        <p role="alert" className="transaction-table__error">
+          Failed to load transactions: {error.message}
+        </p>
       ) : items.length === 0 ? (
         <p className="transaction-table__empty">No transactions match the current filters.</p>
       ) : (

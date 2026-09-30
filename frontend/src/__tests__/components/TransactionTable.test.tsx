@@ -106,4 +106,17 @@ describe("TransactionTable", () => {
       expect(within(incomeRow).queryByRole("combobox")).not.toBeInTheDocument();
     }
   });
+
+  it("renders an error message when the transactions request fails", async () => {
+    server.use(http.get(`${API}/transactions`, () => new HttpResponse(null, { status: 500 })));
+
+    renderTable();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/Failed to load transactions/i);
+    // The misleading empty-state message must not be shown on error.
+    expect(
+      screen.queryByText("No transactions match the current filters.")
+    ).not.toBeInTheDocument();
+  });
 });

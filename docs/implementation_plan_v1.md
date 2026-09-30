@@ -296,24 +296,26 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 
 ## Stage 10 — Transactions Page (Category Tree + Transaction Table)
 **Status: COMPLETED**
-**PR:** `feat(frontend): CategoryTree, CategoryPanel, TransactionTable, TransactionsPage with full hooks`
+**PR:** #15 — `feat(frontend): Transactions page with category tree and transaction table`
 
 ### Files created
 - `frontend/src/services/categoryService.ts`, `transactionService.ts`, `mappingService.ts`, `suggestionService.ts`
-- `frontend/src/hooks/useCategoryTree.ts` — query `["categories"]`; mutations createCategory, renameCategory, moveCategory, deleteCategory (deleteCategory also invalidates `["transactions"]` + `["sankey"]`)
+- `frontend/src/hooks/useCategoryTree.ts` — query `["categories"]`; mutations createCategory, renameCategory, moveCategory, deleteCategory. createCategory invalidates only `["categories"]`; renameCategory, moveCategory, and deleteCategory also invalidate `["transactions"]` + `["sankey"]` (a rename relabels rows/nodes, a move reshapes the Sankey roll-up, a delete reassigns the subtree to Uncategorized)
 - `frontend/src/hooks/useTransactions.ts` — query `["transactions", filters]`; deleteTransaction invalidates `["transactions"]` + `["sankey"]`
 - `frontend/src/hooks/useMappings.ts` — createOrUpdateMapping, deleteMapping; both invalidate `["transactions"]` + `["sankey"]` + `["suggestions"]`
 - `frontend/src/hooks/useSuggestions.ts` — `useQuery` keyed on `["suggestions", sortedIds]` (per `design_v1.md` §8.6, chosen over the earlier "useMutation" note so `useMappings`' `invalidateQueries(["suggestions"])` refreshes badges); `enabled` only when ids present; returns `Map<number, SuggestionResult>`
-- `frontend/src/components/categories/CategoryTree.tsx` — react-arborist; inline rename on double-click; context menu (Add child, Rename, Delete — disabled for id=1); `onMove` → `moveCategory`; flat list sorted by sort_order → tree transform
-- `frontend/src/components/categories/CategoryPanel.tsx` — sidebar, "New root category" button, reads/writes `store.activeCategoryId`
-- `frontend/src/components/transactions/TransactionTable.tsx` — TanStack Table v8; columns: date, description, amount (signed+currency), type badge, bank name, category dropdown (expense only), suggestion badge (unmapped: name + confidence% + Accept); pagination 25/50/100; filter bar (date range from store, type toggle, bank select, search, "Unmapped only"); "Clear mapping" per expense row
+- `frontend/src/components/categories/CategoryTree.tsx` — react-arborist; inline rename on double-click; always-visible per-node action buttons (`+` to add a child — available on every node including id=1; Rename and Delete omitted entirely for id=1, not merely disabled); `onMove` → `moveCategory` (id=1 not draggable); flat list sorted by sort_order → tree transform
+- `frontend/src/components/categories/CategoryPanel.tsx` — sidebar, "New root category" button, reads/writes `store.activeCategoryId`; error state on a failed category load
+- `frontend/src/components/transactions/TransactionTable.tsx` — TanStack Table v8; columns: date, description, amount (signed+currency), type badge, bank name, category dropdown (expense only), suggestion badge (unmapped: name + confidence% + Accept); pagination 25/50/100; filter bar (date range from store, type toggle, bank select, search, "Unmapped only"); "Clear mapping" per *mapped* expense row; error banner on a failed load (never the empty-state message)
 - `frontend/src/components/shared/DateRangePicker.tsx` — date inputs, quick-select: This Month, Last Month, This Year, Last 3 Months; validates start ≤ end
-- `frontend/src/pages/TransactionsPage.tsx` — CategoryPanel (left ~280px) + TransactionTable (main)
+- `frontend/src/pages/TransactionsPage.tsx` — CategoryPanel (left) + TransactionTable (main); the tree is fixed at react-arborist `width={260}`, no explicit panel width (layout CSS deferred — no stylesheet committed yet)
 
 ### Tests
-`useCategoryTree.test.ts` (3), `useMappings.test.ts` (2), `useSuggestions.test.ts` (2)  
+`useCategoryTree.test.ts` (4), `useMappings.test.ts` (2), `useSuggestions.test.ts` (2)  
 `CategoryTree.test.tsx` (4): renders nodes, Add child callback, rename on double-click, id=1 has no rename/delete actions  
-`TransactionTable.test.tsx` (5): renders a row per transaction, suggestion badge for unmapped expense, selecting category calls the mapping API, Next requests the correct page, category dropdown for expense vs dash for income
+`TransactionTable.test.tsx` (6): renders a row per transaction, suggestion badge for unmapped expense, selecting category calls the mapping API, Next requests the correct page, category dropdown for expense vs dash for income, error banner on a failed load  
+`DateRangePicker.test.tsx` (2): rejects an out-of-order range (store untouched + inline error), commits a valid range and clears the error  
+`useCategoryTree.test.ts` covers that moveCategory and deleteCategory both invalidate `["transactions"]` + `["sankey"]`
 
 ---
 
