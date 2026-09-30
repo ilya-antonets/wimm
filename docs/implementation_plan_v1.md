@@ -320,13 +320,14 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 ---
 
 ## Stage 11 — Dashboard + Sankey UI
-**PR:** `feat(frontend): SankeyDiagram, SankeyNodePanel, DashboardPage with drill-down interaction`
+**Status: COMPLETED**
+**PR:** #16 — `feat(frontend): SankeyDiagram, SankeyNodePanel, DashboardPage with drill-down interaction`
 
 ### Files created
 - `frontend/src/services/sankeyService.ts`
 - `frontend/src/hooks/useSankeyData.ts` — query `["sankey", dateFrom, dateTo]`; `staleTime: 30_000`; `enabled: !!dateFrom && !!dateTo`
 - `frontend/src/components/sankey/SankeyDiagram.tsx` — `ReactECharts`; option: `type: "sankey"`, `layout: "none"`, `emphasis: {focus: "adjacency"}`; nodes use `id` as ECharts `name`, `label.formatter` for display name; node click → maps ECharts name back to `SankeyNode.id` → if `transaction_ids` present → `store.openSankeyPanel`; income/separator nodes ignored on click
-- `frontend/src/components/sankey/SankeyNodePanel.tsx` — slide-in panel; compact transaction list via `useTransactions({ids})`; `useTransactions` must fetch all pages when an `ids` list is supplied — loop `page=1,2,…` until `page * page_size >= total` and merge results before rendering; per-row category dropdown; on reassign calls `createOrUpdateMapping` then invalidates `["sankey"]` and closes
+- `frontend/src/components/sankey/SankeyNodePanel.tsx` — slide-in panel; compact transaction list via a single `useTransactions({ids, page: 1, pageSize: 200})` request — the backend's `ids`-mode returns the complete requested set **unpaginated** (`pages=1`, per Stage 5), so no page-loop/merge is needed; per-row category dropdown; on reassign calls `createOrUpdateMapping` then invalidates `["sankey"]` and closes
 - `frontend/src/pages/DashboardPage.tsx` — DateRangePicker + SankeyDiagram + SankeyNodePanel (visibility from store)
 
 ### Tests
