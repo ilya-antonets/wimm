@@ -295,6 +295,7 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 ---
 
 ## Stage 10 — Transactions Page (Category Tree + Transaction Table)
+**Status: COMPLETED**
 **PR:** `feat(frontend): CategoryTree, CategoryPanel, TransactionTable, TransactionsPage with full hooks`
 
 ### Files created
@@ -302,7 +303,7 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 - `frontend/src/hooks/useCategoryTree.ts` — query `["categories"]`; mutations createCategory, renameCategory, moveCategory, deleteCategory (deleteCategory also invalidates `["transactions"]` + `["sankey"]`)
 - `frontend/src/hooks/useTransactions.ts` — query `["transactions", filters]`; deleteTransaction invalidates `["transactions"]` + `["sankey"]`
 - `frontend/src/hooks/useMappings.ts` — createOrUpdateMapping, deleteMapping; both invalidate `["transactions"]` + `["sankey"]` + `["suggestions"]`
-- `frontend/src/hooks/useSuggestions.ts` — `useMutation` (not useQuery — POST endpoint must not auto-refetch); call `mutateSuggestions(transactionIds)` explicitly; returns `Map<number, SuggestionResult>`
+- `frontend/src/hooks/useSuggestions.ts` — `useQuery` keyed on `["suggestions", sortedIds]` (per `design_v1.md` §8.6, chosen over the earlier "useMutation" note so `useMappings`' `invalidateQueries(["suggestions"])` refreshes badges); `enabled` only when ids present; returns `Map<number, SuggestionResult>`
 - `frontend/src/components/categories/CategoryTree.tsx` — react-arborist; inline rename on double-click; context menu (Add child, Rename, Delete — disabled for id=1); `onMove` → `moveCategory`; flat list sorted by sort_order → tree transform
 - `frontend/src/components/categories/CategoryPanel.tsx` — sidebar, "New root category" button, reads/writes `store.activeCategoryId`
 - `frontend/src/components/transactions/TransactionTable.tsx` — TanStack Table v8; columns: date, description, amount (signed+currency), type badge, bank name, category dropdown (expense only), suggestion badge (unmapped: name + confidence% + Accept); pagination 25/50/100; filter bar (date range from store, type toggle, bank select, search, "Unmapped only"); "Clear mapping" per expense row
@@ -311,8 +312,8 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 
 ### Tests
 `useCategoryTree.test.ts` (3), `useMappings.test.ts` (2), `useSuggestions.test.ts` (2)  
-`CategoryTree.test.tsx` (4): renders nodes, Add child callback, rename on double-click, id=1 has no delete action  
-`TransactionTable.test.tsx` (4): renders rows, suggestion badge for unmapped, selecting category calls assign, pagination fires correct offset
+`CategoryTree.test.tsx` (4): renders nodes, Add child callback, rename on double-click, id=1 has no rename/delete actions  
+`TransactionTable.test.tsx` (5): renders a row per transaction, suggestion badge for unmapped expense, selecting category calls the mapping API, Next requests the correct page, category dropdown for expense vs dash for income
 
 ---
 
