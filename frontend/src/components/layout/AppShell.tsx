@@ -1,3 +1,4 @@
+import { AppShell as MantineAppShell } from "@mantine/core";
 import { type ReactNode } from "react";
 import { Toaster } from "react-hot-toast";
 
@@ -15,11 +16,13 @@ export function AppShell({ children }: AppShellProps): JSX.Element {
   const setImportModalOpen = useAppStore((s) => s.setImportModalOpen);
 
   return (
-    <div className="app-shell">
-      <NavBar />
-      <main className="app-shell__content">{children}</main>
+    <MantineAppShell header={{ height: 60 }} padding="md" className="app-shell">
+      <MantineAppShell.Header>
+        <NavBar />
+      </MantineAppShell.Header>
+      <MantineAppShell.Main className="app-shell__content">{children}</MantineAppShell.Main>
       <ImportModal open={importModalOpen} onClose={() => setImportModalOpen(false)} />
       <Toaster position="top-right" />
-    </div>
+    </MantineAppShell>
   );
 }

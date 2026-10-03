@@ -1,13 +1,12 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SankeyNodePanel } from "../../components/sankey/SankeyNodePanel";
 import { useAppStore } from "../../store/useAppStore";
 import type { TransactionPage } from "../../types";
+import { renderWithProviders } from "../hooks/testUtils";
 import { server } from "../mocks/server";
 
 const API = "http://localhost:8000/api";
@@ -44,13 +43,7 @@ const page: TransactionPage = {
 };
 
 function renderPanel() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }): JSX.Element => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  );
-  return render(<SankeyNodePanel />, { wrapper });
+  return renderWithProviders(<SankeyNodePanel />, { withQuery: true });
 }
 
 describe("SankeyNodePanel", () => {

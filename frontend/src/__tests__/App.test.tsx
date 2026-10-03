@@ -1,21 +1,16 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import { type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "../App";
+
+import { renderWithProviders } from "./hooks/testUtils";
 
 // jsdom cannot render the real ECharts canvas — stub the wrapper.
 vi.mock("echarts-for-react", () => ({ default: () => null }));
 
 function renderApp(): ReturnType<typeof render> {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }): JSX.Element => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  );
-  return render(<App />, { wrapper });
+  // App provides its own BrowserRouter, so only wrap in Mantine + Query.
+  return renderWithProviders(<App />, { withQuery: true });
 }
 
 describe("App", () => {

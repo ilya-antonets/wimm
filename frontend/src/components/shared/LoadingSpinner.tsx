@@ -1,8 +1,10 @@
+import { Group, Loader, Text } from "@mantine/core";
+
 export function LoadingSpinner({ label = "Loading…" }: { label?: string }): JSX.Element {
   return (
-    <div role="status" aria-live="polite" className="loading-spinner">
-      <span className="loading-spinner__dot" aria-hidden="true" />
-      <span className="loading-spinner__label">{label}</span>
-    </div>
+    <Group role="status" aria-live="polite" className="loading-spinner" gap="xs">
+      <Loader size="sm" aria-hidden="true" />
+      <Text className="loading-spinner__label">{label}</Text>
+    </Group>
   );
 }

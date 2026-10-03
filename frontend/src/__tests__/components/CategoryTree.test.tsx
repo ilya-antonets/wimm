@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { CategoryTree } from "../../components/categories/CategoryTree";
+import { renderWithProviders } from "../hooks/testUtils";
 import type { CategoryRead } from "../../types";
 
 const categories: CategoryRead[] = [
@@ -22,7 +23,7 @@ function renderTree(overrides: Partial<Parameters<typeof CategoryTree>[0]> = {})
     onMove: vi.fn(),
     ...overrides,
   };
-  render(<CategoryTree {...props} />);
+  renderWithProviders(<CategoryTree {...props} />);
   return props;
 }
 

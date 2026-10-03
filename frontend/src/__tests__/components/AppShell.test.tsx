@@ -1,23 +1,16 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { type ReactNode } from "react";
-import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { AppShell } from "../../components/layout/AppShell";
 import { useAppStore } from "../../store/useAppStore";
+import { renderWithProviders } from "../hooks/testUtils";
 
-function renderShell(children: ReactNode): ReturnType<typeof render> {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
+function renderShell(children: ReactNode): ReturnType<typeof renderWithProviders> {
+  return renderWithProviders(<AppShell>{children}</AppShell>, {
+    withRouter: true,
+    withQuery: true,
   });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <AppShell>{children}</AppShell>
-      </MemoryRouter>
-    </QueryClientProvider>
-  );
 }
 
 describe("AppShell", () => {

@@ -1,23 +1,18 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 
 import { TransactionTable } from "../../components/transactions/TransactionTable";
+import { renderWithProviders } from "../hooks/testUtils";
 import { server } from "../mocks/server";
 
 const API = "http://localhost:8000/api";
 
 function renderTable(filterCategoryId: number | null = null) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
+  return renderWithProviders(<TransactionTable filterCategoryId={filterCategoryId} />, {
+    withQuery: true,
   });
-  const wrapper = ({ children }: { children: ReactNode }): JSX.Element => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  );
-  return render(<TransactionTable filterCategoryId={filterCategoryId} />, { wrapper });
 }
 
 describe("TransactionTable", () => {

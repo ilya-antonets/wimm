@@ -1,3 +1,4 @@
+import { Badge, Button, Checkbox, Group, NativeSelect, Table, Text, TextInput } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
 import {
   createColumnHelper,
@@ -105,13 +106,21 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
       columnHelper.accessor("amount", {
         header: "Amount",
         cell: (info) => (
-          <span className="transaction-table__amount">{formatAmount(info.getValue())}</span>
+          <Text component="span" className="transaction-table__amount">
+            {formatAmount(info.getValue())}
+          </Text>
         ),
       }),
       columnHelper.accessor("type", {
         header: "Type",
         cell: (info) => (
-          <span className={`badge badge--${info.getValue()}`}>{info.getValue()}</span>
+          <Badge
+            className={`badge badge--${info.getValue()}`}
+            color={info.getValue() === "income" ? "teal" : "red"}
+            variant="light"
+          >
+            {info.getValue()}
+          </Badge>
         ),
       }),
       columnHelper.accessor("bank_name", { header: "Bank" }),
@@ -120,15 +129,20 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
         header: "Category",
         cell: ({ row }) => {
           const tx = row.original;
-          if (tx.type !== "expense") return <span className="transaction-table__muted">—</span>;
+          if (tx.type !== "expense")
+            return (
+              <Text component="span" c="dimmed" className="transaction-table__muted">
+                —
+              </Text>
+            );
           return (
-            <div className="transaction-table__category">
-              <select
+            <Group className="transaction-table__category" gap="xs" wrap="nowrap">
+              <NativeSelect
                 aria-label={`Category for ${tx.description}`}
                 value={tx.mapping?.category_id ?? ""}
                 onChange={(e) => {
-                  const categoryId = Number(e.target.value);
-                  if (!Number.isNaN(categoryId) && e.target.value !== "") {
+                  const categoryId = Number(e.currentTarget.value);
+                  if (!Number.isNaN(categoryId) && e.currentTarget.value !== "") {
                     createOrUpdateMapping.mutate({
                       transaction_id: tx.id,
                       category_id: categoryId,
@@ -142,17 +156,18 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
               {tx.mapping != null && (
-                <button
-                  type="button"
+                <Button
+                  variant="subtle"
+                  size="compact-xs"
                   aria-label={`Clear mapping for ${tx.description}`}
                   onClick={() => deleteMapping.mutate(tx.id)}
                 >
                   Clear
-                </button>
+                </Button>
               )}
-            </div>
+            </Group>
           );
         },
       }),
@@ -165,13 +180,14 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
           const suggestion: SuggestionResult | undefined = suggestions.get(tx.id);
           if (!suggestion) return null;
           return (
-            <span className="suggestion-badge">
+            <Group className="suggestion-badge" gap="xs" wrap="nowrap">
               <span className="suggestion-badge__name">{suggestion.suggested_category_name}</span>
               <span className="suggestion-badge__confidence">
                 {Math.round(suggestion.confidence * 100)}%
               </span>
-              <button
-                type="button"
+              <Button
+                variant="light"
+                size="compact-xs"
                 aria-label={`Accept suggestion for ${tx.description}`}
                 onClick={() =>
                   createOrUpdateMapping.mutate({
@@ -181,8 +197,8 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
                 }
               >
                 Accept
-              </button>
-            </span>
+              </Button>
+            </Group>
           );
         },
       }),
@@ -202,22 +218,22 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
 
   return (
     <div className="transaction-table">
-      <div className="transaction-table__filters">
+      <Group className="transaction-table__filters" gap="md" align="flex-end" wrap="wrap" mb="md">
         <DateRangePicker />
-        <select
+        <NativeSelect
           aria-label="Type filter"
           value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value as TransactionType | "")}
+          onChange={(e) => setTypeFilter(e.currentTarget.value as TransactionType | "")}
         >
           <option value="">All types</option>
           <option value="income">Income</option>
           <option value="expense">Expense</option>
-        </select>
-        <select
+        </NativeSelect>
+        <NativeSelect
           aria-label="Bank filter"
           value={bankIdFilter ?? ""}
           onChange={(e) =>
-            setBankIdFilter(e.target.value === "" ? undefined : Number(e.target.value))
+            setBankIdFilter(e.currentTarget.value === "" ? undefined : Number(e.currentTarget.value))
           }
         >
           <option value="">All banks</option>
@@ -226,81 +242,85 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
               {b.name}
             </option>
           ))}
-        </select>
-        <input
+        </NativeSelect>
+        <TextInput
           type="search"
           aria-label="Search descriptions"
           placeholder="Search…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => setSearch(e.currentTarget.value)}
         />
-        <label className="transaction-table__unmapped">
-          <input
-            type="checkbox"
-            checked={unmappedOnly}
-            onChange={(e) => setUnmappedOnly(e.target.checked)}
-          />
-          Unmapped only
-        </label>
-      </div>
+        <Checkbox
+          className="transaction-table__unmapped"
+          label="Unmapped only"
+          checked={unmappedOnly}
+          onChange={(e) => setUnmappedOnly(e.currentTarget.checked)}
+        />
+      </Group>
 
       {isLoading ? (
         <LoadingSpinner label="Loading transactions…" />
       ) : error ? (
-        <p role="alert" className="transaction-table__error">
+        <Text role="alert" c="red" className="transaction-table__error">
           Failed to load transactions: {error.message}
-        </p>
+        </Text>
       ) : items.length === 0 ? (
-        <p className="transaction-table__empty">No transactions match the current filters.</p>
+        <Text className="transaction-table__empty">No transactions match the current filters.</Text>
       ) : (
-        <table className="transaction-table__grid">
-          <thead>
+        <Table className="transaction-table__grid" highlightOnHover withTableBorder>
+          <Table.Thead>
             {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id}>
+              <Table.Tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <th key={header.id}>
+                  <Table.Th key={header.id}>
                     {header.isPlaceholder
                       ? null
                       : flexRender(header.column.columnDef.header, header.getContext())}
-                  </th>
+                  </Table.Th>
                 ))}
-              </tr>
+              </Table.Tr>
             ))}
-          </thead>
-          <tbody>
+          </Table.Thead>
+          <Table.Tbody>
             {table.getRowModel().rows.map((row) => (
-              <tr key={row.id}>
+              <Table.Tr key={row.id}>
                 {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                  <Table.Td key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </Table.Td>
                 ))}
-              </tr>
+              </Table.Tr>
             ))}
-          </tbody>
-        </table>
+          </Table.Tbody>
+        </Table>
       )}
 
-      <div className="transaction-table__pagination">
-        <select
+      <Group className="transaction-table__pagination" gap="sm" mt="md" align="center">
+        <NativeSelect
           aria-label="Page size"
           value={pageSize}
-          onChange={(e) => setPageSize(Number(e.target.value))}
+          onChange={(e) => setPageSize(Number(e.currentTarget.value))}
         >
           {PAGE_SIZES.map((size) => (
             <option key={size} value={size}>
               {size} per page
             </option>
           ))}
-        </select>
-        <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+        </NativeSelect>
+        <Button variant="default" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
           Previous
-        </button>
-        <span className="transaction-table__page-indicator">
+        </Button>
+        <Text component="span" className="transaction-table__page-indicator">
           Page {page} of {totalPages}
-        </span>
-        <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+        </Text>
+        <Button
+          variant="default"
+          disabled={page >= totalPages}
+          onClick={() => setPage((p) => p + 1)}
+        >
           Next
-        </button>
-      </div>
+        </Button>
+      </Group>
     </div>
   );
 }

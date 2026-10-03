@@ -1,8 +1,19 @@
+import { MantineProvider } from "@mantine/core";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ErrorBoundary } from "../../components/shared/ErrorBoundary";
+import { theme } from "../../theme";
+
+function wrapper({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <MantineProvider theme={theme} defaultColorScheme="light">
+      {children}
+    </MantineProvider>
+  );
+}
 
 function Bomb({ explode }: { explode: boolean }): JSX.Element {
   if (explode) throw new Error("boom");
@@ -18,7 +29,8 @@ describe("ErrorBoundary", () => {
     render(
       <ErrorBoundary>
         <div>happy child</div>
-      </ErrorBoundary>
+      </ErrorBoundary>,
+      { wrapper }
     );
     expect(screen.getByText("happy child")).toBeInTheDocument();
   });
@@ -28,7 +40,8 @@ describe("ErrorBoundary", () => {
     render(
       <ErrorBoundary>
         <Bomb explode />
-      </ErrorBoundary>
+      </ErrorBoundary>,
+      { wrapper }
     );
     const alert = screen.getByRole("alert");
     expect(within(alert).getByText("Something went wrong.")).toBeInTheDocument();
@@ -41,7 +54,8 @@ describe("ErrorBoundary", () => {
     const { rerender } = render(
       <ErrorBoundary>
         <Bomb explode />
-      </ErrorBoundary>
+      </ErrorBoundary>,
+      { wrapper }
     );
     expect(screen.getByRole("alert")).toBeInTheDocument();
 

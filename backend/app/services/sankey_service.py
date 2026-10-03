@@ -197,8 +197,35 @@ def _expense_nodes_and_links(
         if cat_id in nodes_with_children and raw_totals.get(cat_id, Decimal(0)) > 0
     }
 
-    nodes: list[SankeyNode] = []
+    # Order visible categories depth-first by sibling-scoped `sort_order` so the
+    # diagram's node order matches the expanded category tree — this keeps links
+    # from crossing (the frontend renders them in this exact order).
+    children_by_parent: dict[int | None, list[int]] = defaultdict(list)
     for cat_id in visible_ids:
+        children_by_parent[cat_map[cat_id].parent_id].append(cat_id)
+    for siblings in children_by_parent.values():
+        siblings.sort(key=lambda c: (cat_map[c].sort_order, c))
+
+    ordered_ids: list[int] = []
+
+    def _walk(cat_id: int) -> None:
+        ordered_ids.append(cat_id)
+        for child_id in children_by_parent[cat_id]:
+            _walk(child_id)
+
+    roots = sorted(
+        (
+            cat_id
+            for cat_id in visible_ids
+            if cat_map[cat_id].parent_id is None or cat_map[cat_id].parent_id not in visible_ids
+        ),
+        key=lambda c: (cat_map[c].sort_order, c),
+    )
+    for root_id in roots:
+        _walk(root_id)
+
+    nodes: list[SankeyNode] = []
+    for cat_id in ordered_ids:
         cat = cat_map[cat_id]
         nodes.append(
             SankeyNode(
@@ -218,7 +245,7 @@ def _expense_nodes_and_links(
 
     # Step 8: expense links.
     links: list[SankeyLink] = []
-    for cat_id in visible_ids:
+    for cat_id in ordered_ids:
         cat = cat_map[cat_id]
         if cat.parent_id is None or cat.parent_id not in visible_ids:
             source = EXPENSES_NODE_ID

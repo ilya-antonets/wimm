@@ -1,17 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { NavBar } from "../../components/layout/NavBar";
 import { useAppStore } from "../../store/useAppStore";
+import { renderWithProviders } from "../hooks/testUtils";
 
-function renderNavBar(): ReturnType<typeof render> {
-  return render(
-    <MemoryRouter>
-      <NavBar />
-    </MemoryRouter>
-  );
+function renderNavBar(): ReturnType<typeof renderWithProviders> {
+  return renderWithProviders(<NavBar />, { withRouter: true });
 }
 
 describe("NavBar", () => {

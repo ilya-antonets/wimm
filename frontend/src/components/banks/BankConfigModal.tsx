@@ -1,3 +1,4 @@
+import { Button, Fieldset, Group, Modal, Stack, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 
@@ -135,91 +136,89 @@ export function BankConfigModal({ bank, open, onClose }: BankConfigModalProps): 
   const saving = createBank.isPending || updateBank.isPending;
 
   return (
-    <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={isEdit ? "Edit bank" : "Add bank"}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="dialog__title">{isEdit ? "Edit Bank" : "Add Bank"}</h2>
-        <form className="bank-form" onSubmit={handleSubmit}>
-          <label className="bank-form__field">
-            <span>Name</span>
-            <input value={form.name} onChange={set("name")} required />
-          </label>
-          <label className="bank-form__field">
-            <span>Date format</span>
-            <input
-              value={form.date_format}
-              onChange={set("date_format")}
-              placeholder="%Y-%m-%d"
-              required
-            />
-          </label>
-          <label className="bank-form__field">
-            <span>Encoding</span>
-            <input value={form.encoding} onChange={set("encoding")} required />
-          </label>
-          <label className="bank-form__field">
-            <span>Skip header rows</span>
-            <input
-              type="number"
-              min={0}
-              value={form.skip_header_rows}
-              onChange={set("skip_header_rows")}
-            />
-          </label>
-          <label className="bank-form__field">
-            <span>Skip footer rows</span>
-            <input
-              type="number"
-              min={0}
-              value={form.skip_footer_rows}
-              onChange={set("skip_footer_rows")}
-            />
-          </label>
+    <Modal
+      opened={open}
+      onClose={onClose}
+      withCloseButton={false}
+      className="dialog"
+      aria-label={isEdit ? "Edit bank" : "Add bank"}
+      size="lg"
+      title={isEdit ? "Edit Bank" : "Add Bank"}
+    >
+      <form className="bank-form" onSubmit={handleSubmit}>
+        <Stack gap="sm">
+          <TextInput label="Name" value={form.name} onChange={set("name")} required />
+          <TextInput
+            label="Date format"
+            value={form.date_format}
+            onChange={set("date_format")}
+            placeholder="%Y-%m-%d"
+            required
+          />
+          <TextInput label="Encoding" value={form.encoding} onChange={set("encoding")} required />
+          <TextInput
+            label="Skip header rows"
+            type="number"
+            min={0}
+            value={form.skip_header_rows}
+            onChange={set("skip_header_rows")}
+          />
+          <TextInput
+            label="Skip footer rows"
+            type="number"
+            min={0}
+            value={form.skip_footer_rows}
+            onChange={set("skip_footer_rows")}
+          />
 
-          <fieldset className="bank-form__columns">
-            <legend>Column mapping</legend>
-            <label className="bank-form__field">
-              <span>Date column</span>
-              <input value={form.col_date} onChange={set("col_date")} required />
-            </label>
-            <label className="bank-form__field">
-              <span>Amount column</span>
-              <input value={form.col_amount} onChange={set("col_amount")} required />
-            </label>
-            <label className="bank-form__field">
-              <span>Description column</span>
-              <input value={form.col_description} onChange={set("col_description")} required />
-            </label>
-            <label className="bank-form__field">
-              <span>Transaction ID column (optional)</span>
-              <input value={form.col_transaction_id} onChange={set("col_transaction_id")} />
-            </label>
-          </fieldset>
+          <Fieldset legend="Column mapping" className="bank-form__columns">
+            <Stack gap="sm">
+              <TextInput
+                label="Date column"
+                value={form.col_date}
+                onChange={set("col_date")}
+                required
+              />
+              <TextInput
+                label="Amount column"
+                value={form.col_amount}
+                onChange={set("col_amount")}
+                required
+              />
+              <TextInput
+                label="Description column"
+                value={form.col_description}
+                onChange={set("col_description")}
+                required
+              />
+              <TextInput
+                label="Transaction ID column (optional)"
+                value={form.col_transaction_id}
+                onChange={set("col_transaction_id")}
+              />
+            </Stack>
+          </Fieldset>
 
-          <div className="dialog__actions">
+          <Group justify="flex-end" className="dialog__actions">
             {isEdit && (
-              <button
-                type="button"
+              <Button
+                variant="outline"
+                color="red"
                 className="bank-form__delete"
                 onClick={() => setConfirmOpen(true)}
               >
                 Delete Bank
-              </button>
+              </Button>
             )}
-            <button type="button" onClick={onClose}>
+            <Button variant="default" onClick={onClose}>
               Cancel
-            </button>
-            <button type="submit" className="dialog__confirm" disabled={saving}>
+            </Button>
+            <Button type="submit" className="dialog__confirm" disabled={saving}>
               {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </form>
-      </div>
+            </Button>
+          </Group>
+        </Stack>
+      </form>
 
       <ConfirmDialog
         open={confirmOpen}
@@ -236,6 +235,6 @@ export function BankConfigModal({ bank, open, onClose }: BankConfigModalProps): 
         }}
         onCancel={() => setConfirmOpen(false)}
       />
-    </div>
+    </Modal>
   );
 }

@@ -1,3 +1,4 @@
+import { Alert, Button, Stack, Text, Title } from "@mantine/core";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 import { logger } from "../../utils/logger";
@@ -29,13 +30,17 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <div role="alert" className="error-boundary">
-          <h1>Something went wrong.</h1>
-          {this.state.message && <p>{this.state.message}</p>}
-          <button type="button" onClick={this.handleReset}>
-            Try again
-          </button>
-        </div>
+        <Alert role="alert" className="error-boundary" color="red" m="md">
+          <Stack gap="sm" align="flex-start">
+            <Title order={1} size="h3">
+              Something went wrong.
+            </Title>
+            {this.state.message && <Text>{this.state.message}</Text>}
+            <Button variant="light" onClick={this.handleReset}>
+              Try again
+            </Button>
+          </Stack>
+        </Alert>
       );
     }
     return this.props.children;

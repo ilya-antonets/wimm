@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DateRangePicker } from "../../components/shared/DateRangePicker";
 import { useAppStore } from "../../store/useAppStore";
+import { renderWithProviders } from "../hooks/testUtils";
 
 describe("DateRangePicker", () => {
   beforeEach(() => {
@@ -10,7 +11,7 @@ describe("DateRangePicker", () => {
   });
 
   it("does not commit a range whose start is after the end, and shows an error", () => {
-    render(<DateRangePicker />);
+    renderWithProviders(<DateRangePicker />);
 
     fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-10-15" } });
 
@@ -20,7 +21,7 @@ describe("DateRangePicker", () => {
   });
 
   it("commits a valid range and clears a prior error", () => {
-    render(<DateRangePicker />);
+    renderWithProviders(<DateRangePicker />);
 
     fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-10-15" } });
     expect(screen.getByRole("alert")).toBeInTheDocument();
@@ -32,7 +33,7 @@ describe("DateRangePicker", () => {
   });
 
   it("commits a first-of-month range and clears errors when 'This Month' is clicked", () => {
-    render(<DateRangePicker />);
+    renderWithProviders(<DateRangePicker />);
 
     // Trigger an error first so we can confirm the preset clears it.
     fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-10-15" } });
@@ -45,7 +46,7 @@ describe("DateRangePicker", () => {
   });
 
   it("commits an ordered range when 'Last Month' is clicked", () => {
-    render(<DateRangePicker />);
+    renderWithProviders(<DateRangePicker />);
 
     fireEvent.click(screen.getByRole("button", { name: "Last Month" }));
 

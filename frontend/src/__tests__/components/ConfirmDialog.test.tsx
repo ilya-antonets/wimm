@@ -3,9 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConfirmDialog } from "../../components/shared/ConfirmDialog";
+import { renderWithProviders } from "../hooks/testUtils";
 
 describe("ConfirmDialog", () => {
   it("renders nothing when open is false", () => {
+    // Closed dialog returns null before touching Mantine, so no provider needed —
+    // and skipping it keeps the container free of injected Mantine <style> tags.
     const { container } = render(
       <ConfirmDialog
         open={false}
@@ -19,7 +22,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("shows the title and message when open", () => {
-    render(
+    renderWithProviders(
       <ConfirmDialog
         open
         title="Delete category"
@@ -36,7 +39,7 @@ describe("ConfirmDialog", () => {
     const user = userEvent.setup();
     const onConfirm = vi.fn();
     const onCancel = vi.fn();
-    render(
+    renderWithProviders(
       <ConfirmDialog
         open
         title="Delete"
@@ -57,7 +60,7 @@ describe("ConfirmDialog", () => {
     const user = userEvent.setup();
     const onConfirm = vi.fn();
     const onCancel = vi.fn();
-    render(
+    renderWithProviders(
       <ConfirmDialog
         open
         title="Delete bank"

@@ -1,3 +1,4 @@
+import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -7,6 +8,7 @@ import toast from "react-hot-toast";
 import { describe, expect, it, vi } from "vitest";
 
 import { BankConfigModal } from "../../components/banks/BankConfigModal";
+import { theme } from "../../theme";
 import { server } from "../mocks/server";
 import type { BankRead } from "../../types";
 
@@ -22,12 +24,18 @@ const sampleBank: BankRead = {
   encoding: "utf-8",
 };
 
-function renderModal(bank: BankRead | null, open = true, onClose = vi.fn()) {
-  const client = new QueryClient({
+function makeClient(): QueryClient {
+  return new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
   });
+}
+
+function renderModal(bank: BankRead | null, open = true, onClose = vi.fn()) {
+  const client = makeClient();
   const wrapper = ({ children }: { children: ReactNode }): JSX.Element => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    <MantineProvider theme={theme} defaultColorScheme="light">
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    </MantineProvider>
   );
   const utils = render(<BankConfigModal bank={bank} open={open} onClose={onClose} />, { wrapper });
   return { ...utils, onClose };
@@ -35,7 +43,16 @@ function renderModal(bank: BankRead | null, open = true, onClose = vi.fn()) {
 
 describe("BankConfigModal", () => {
   it("returns null when open is false", () => {
-    const { container } = renderModal(null, false);
+    // Closed modal returns null before touching Mantine; render query-only so no
+    // Mantine <style> tags land in the container.
+    const client = makeClient();
+    const wrapper = ({ children }: { children: ReactNode }): JSX.Element => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { container } = render(
+      <BankConfigModal bank={null} open={false} onClose={vi.fn()} />,
+      { wrapper }
+    );
     expect(container).toBeEmptyDOMElement();
   });
 

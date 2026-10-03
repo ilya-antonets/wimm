@@ -1,3 +1,5 @@
+import { Button, Group, Overlay, Paper, Text, Title } from "@mantine/core";
+
 interface ConfirmDialogProps {
   open: boolean;
   title: string;
@@ -19,32 +21,45 @@ export function ConfirmDialog({
 }: ConfirmDialogProps): JSX.Element | null {
   if (!open) return null;
   return (
-    <div
+    <Overlay
+      color="#000"
+      backgroundOpacity={0.5}
+      zIndex={1000}
       className="dialog-backdrop"
       role="presentation"
       onClick={(e) => {
         e.stopPropagation();
         onCancel();
       }}
+      style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
     >
-      <div
+      <Paper
+        shadow="md"
+        p="lg"
+        radius="md"
         className="dialog"
         role="alertdialog"
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
+        maw={420}
+        w="90%"
       >
-        <h2 className="dialog__title">{title}</h2>
-        <p className="dialog__message">{message}</p>
-        <div className="dialog__actions">
-          <button type="button" onClick={onCancel}>
+        <Title order={2} size="h4" className="dialog__title">
+          {title}
+        </Title>
+        <Text className="dialog__message" mt="sm">
+          {message}
+        </Text>
+        <Group justify="flex-end" mt="lg" className="dialog__actions">
+          <Button variant="default" onClick={onCancel}>
             {cancelLabel}
-          </button>
-          <button type="button" className="dialog__confirm" onClick={onConfirm}>
+          </Button>
+          <Button color="red" className="dialog__confirm" onClick={onConfirm}>
             {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </Group>
+      </Paper>
+    </Overlay>
   );
 }

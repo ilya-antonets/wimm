@@ -1,3 +1,4 @@
+import { Button, Group, Input, Stack, Text } from "@mantine/core";
 import { useState } from "react";
 
 import { useAppStore } from "../../store/useAppStore";
@@ -79,41 +80,48 @@ export function DateRangePicker(): JSX.Element {
   };
 
   return (
-    <div className="date-range-picker">
-      <label className="date-range-picker__field">
-        <span>From</span>
-        <input
-          type="date"
-          aria-label="From date"
-          value={dateRange.from}
-          max={dateRange.to}
-          onChange={(e) => commitIfValid({ ...dateRange, from: e.target.value })}
-        />
-      </label>
-      <label className="date-range-picker__field">
-        <span>To</span>
-        <input
-          type="date"
-          aria-label="To date"
-          value={dateRange.to}
-          min={dateRange.from}
-          onChange={(e) => commitIfValid({ ...dateRange, to: e.target.value })}
-        />
-      </label>
+    <Stack gap="xs" className="date-range-picker">
+      <Group gap="md" align="flex-end">
+        <Input.Wrapper label="From" className="date-range-picker__field">
+          <Input
+            component="input"
+            type="date"
+            aria-label="From date"
+            value={dateRange.from}
+            max={dateRange.to}
+            onChange={(e) => commitIfValid({ ...dateRange, from: e.currentTarget.value })}
+          />
+        </Input.Wrapper>
+        <Input.Wrapper label="To" className="date-range-picker__field">
+          <Input
+            component="input"
+            type="date"
+            aria-label="To date"
+            value={dateRange.to}
+            min={dateRange.from}
+            onChange={(e) => commitIfValid({ ...dateRange, to: e.currentTarget.value })}
+          />
+        </Input.Wrapper>
 
-      <div className="date-range-picker__presets">
-        {QUICK_SELECTS.map((preset) => (
-          <button key={preset.label} type="button" onClick={() => commitIfValid(preset.range())}>
-            {preset.label}
-          </button>
-        ))}
-      </div>
+        <Group gap="xs" className="date-range-picker__presets">
+          {QUICK_SELECTS.map((preset) => (
+            <Button
+              key={preset.label}
+              variant="light"
+              size="xs"
+              onClick={() => commitIfValid(preset.range())}
+            >
+              {preset.label}
+            </Button>
+          ))}
+        </Group>
+      </Group>
 
       {invalid && (
-        <p role="alert" className="date-range-picker__error">
+        <Text role="alert" c="red" size="sm" className="date-range-picker__error">
           Start date must not be after end date.
-        </p>
+        </Text>
       )}
-    </div>
+    </Stack>
   );
 }

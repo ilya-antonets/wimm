@@ -1,3 +1,4 @@
+import { Button, Group, Paper, Text, TextInput, Title } from "@mantine/core";
 import { useState } from "react";
 
 import { useCategoryTree } from "../../hooks/useCategoryTree";
@@ -52,13 +53,15 @@ export function CategoryPanel(): JSX.Element {
     pendingDeleteId != null ? (categories.find((c) => c.id === pendingDeleteId) ?? null) : null;
 
   return (
-    <aside className="category-panel">
-      <header className="category-panel__header">
-        <h2>Categories</h2>
-        <button type="button" onClick={() => beginCreate(null)}>
+    <Paper component="aside" className="category-panel" withBorder p="md" radius="md">
+      <Group className="category-panel__header" justify="space-between" mb="sm">
+        <Title order={2} size="h4">
+          Categories
+        </Title>
+        <Button variant="light" size="xs" onClick={() => beginCreate(null)}>
           New root category
-        </button>
-      </header>
+        </Button>
+      </Group>
 
       {pendingCreate && (
         <form
@@ -68,30 +71,34 @@ export function CategoryPanel(): JSX.Element {
             submitCreate();
           }}
         >
-          <input
-            aria-label="New category name"
-            autoFocus
-            placeholder={
-              pendingCreate.parentId == null ? "Root category name" : "Child category name"
-            }
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <button type="submit" disabled={createCategory.isPending || !newName.trim()}>
-            {createCategory.isPending ? "Saving…" : "Save"}
-          </button>
-          <button type="button" onClick={() => setPendingCreate(null)}>
-            Cancel
-          </button>
+          <Group gap="xs" mb="sm" align="flex-end">
+            <TextInput
+              aria-label="New category name"
+              data-autofocus
+              autoFocus
+              style={{ flex: 1 }}
+              placeholder={
+                pendingCreate.parentId == null ? "Root category name" : "Child category name"
+              }
+              value={newName}
+              onChange={(e) => setNewName(e.currentTarget.value)}
+            />
+            <Button type="submit" disabled={createCategory.isPending || !newName.trim()}>
+              {createCategory.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button variant="default" onClick={() => setPendingCreate(null)}>
+              Cancel
+            </Button>
+          </Group>
         </form>
       )}
 
       {isLoading ? (
         <LoadingSpinner label="Loading categories…" />
       ) : error ? (
-        <p role="alert" className="category-panel__error">
+        <Text role="alert" c="red" className="category-panel__error">
           Failed to load categories: {error.message}
-        </p>
+        </Text>
       ) : (
         <CategoryTree
           categories={categories}
@@ -121,6 +128,6 @@ export function CategoryPanel(): JSX.Element {
         }}
         onCancel={() => setPendingDeleteId(null)}
       />
-    </aside>
+    </Paper>
   );
 }

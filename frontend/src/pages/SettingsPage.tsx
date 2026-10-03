@@ -1,3 +1,5 @@
+import { Button, Container, Group, Stack, Text, Title } from "@mantine/core";
+
 import { useBanks } from "../hooks/useBanks";
 import { BankConfigModal } from "../components/banks/BankConfigModal";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
@@ -16,35 +18,35 @@ export function SettingsPage(): JSX.Element {
       : null;
 
   return (
-    <section className="page page--settings">
-      <header className="page__header">
-        <h1>Settings</h1>
-        <div className="page__actions">
-          <button type="button" onClick={() => openBankConfigModal(null)}>
-            Add Bank
-          </button>
-          <button type="button" onClick={() => setImportModalOpen(true)}>
+    <Container size="md" className="page page--settings">
+      <Group justify="space-between" className="page__header" mb="md">
+        <Title order={1}>Settings</Title>
+        <Group className="page__actions" gap="sm">
+          <Button onClick={() => openBankConfigModal(null)}>Add Bank</Button>
+          <Button variant="default" onClick={() => setImportModalOpen(true)}>
             Import CSV
-          </button>
-        </div>
-      </header>
+          </Button>
+        </Group>
+      </Group>
 
-      <h2>Banks</h2>
+      <Title order={2} size="h3" mb="sm">
+        Banks
+      </Title>
       {isLoading ? (
         <LoadingSpinner label="Loading banks…" />
       ) : banks.length === 0 ? (
-        <p>No banks configured yet. Add one to start importing statements.</p>
+        <Text>No banks configured yet. Add one to start importing statements.</Text>
       ) : (
-        <ul className="bank-list">
+        <Stack gap="xs" className="bank-list">
           {banks.map((bank) => (
-            <li key={bank.id} className="bank-list__item">
-              <span className="bank-list__name">{bank.name}</span>
-              <button type="button" onClick={() => openBankConfigModal(bank.id)}>
+            <Group key={bank.id} justify="space-between" className="bank-list__item">
+              <Text className="bank-list__name">{bank.name}</Text>
+              <Button variant="subtle" onClick={() => openBankConfigModal(bank.id)}>
                 Edit
-              </button>
-            </li>
+              </Button>
+            </Group>
           ))}
-        </ul>
+        </Stack>
       )}
 
       <BankConfigModal
@@ -52,6 +54,6 @@ export function SettingsPage(): JSX.Element {
         open={bankConfigModalState.open}
         onClose={closeBankConfigModal}
       />
-    </section>
+    </Container>
   );
 }
