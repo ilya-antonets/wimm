@@ -49,10 +49,9 @@ describe("BankConfigModal", () => {
     const wrapper = ({ children }: { children: ReactNode }): JSX.Element => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
-    const { container } = render(
-      <BankConfigModal bank={null} open={false} onClose={vi.fn()} />,
-      { wrapper }
-    );
+    const { container } = render(<BankConfigModal bank={null} open={false} onClose={vi.fn()} />, {
+      wrapper,
+    });
     expect(container).toBeEmptyDOMElement();
   });
 

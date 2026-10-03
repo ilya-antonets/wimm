@@ -14,7 +14,14 @@ export function NavBar(): JSX.Element {
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
 
   return (
-    <Group component="nav" className="navbar" h="100%" px="md" justify="space-between" wrap="nowrap">
+    <Group
+      component="nav"
+      className="navbar"
+      h="100%"
+      px="md"
+      justify="space-between"
+      wrap="nowrap"
+    >
       <Text component="span" fw={700} size="lg" className="navbar__logo">
         WIMM
       </Text>

@@ -1,4 +1,13 @@
-import { Badge, Button, Checkbox, Group, NativeSelect, Table, Text, TextInput } from "@mantine/core";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Group,
+  NativeSelect,
+  Table,
+  Text,
+  TextInput,
+} from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
 import {
   createColumnHelper,
@@ -233,7 +242,9 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
           aria-label="Bank filter"
           value={bankIdFilter ?? ""}
           onChange={(e) =>
-            setBankIdFilter(e.currentTarget.value === "" ? undefined : Number(e.currentTarget.value))
+            setBankIdFilter(
+              e.currentTarget.value === "" ? undefined : Number(e.currentTarget.value)
+            )
           }
         >
           <option value="">All banks</option>

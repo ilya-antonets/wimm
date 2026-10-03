@@ -62,7 +62,12 @@ export function SankeyNodePanel(): JSX.Element {
       ) : (
         <Stack gap="sm" className="sankey-node-panel__list">
           {items.map((tx) => (
-            <Group key={tx.id} className="sankey-node-panel__row" justify="space-between" wrap="nowrap">
+            <Group
+              key={tx.id}
+              className="sankey-node-panel__row"
+              justify="space-between"
+              wrap="nowrap"
+            >
               <Text component="span" size="sm" className="sankey-node-panel__date">
                 {tx.date}
               </Text>
