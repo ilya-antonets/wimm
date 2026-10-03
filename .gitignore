@@ -25,6 +25,8 @@ frontend/dist/
 frontend/coverage/
 
 # Playwright
+frontend/e2e/
+frontend/playwright.config.ts
 frontend/test-results/
 frontend/playwright-report/
 frontend/playwright/.cache/
