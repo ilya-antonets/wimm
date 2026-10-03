@@ -1,3 +1,4 @@
+import { ActionIcon, Button, Group, Text } from "@mantine/core";
 import { useRef } from "react";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 
@@ -117,69 +118,79 @@ export function CategoryTree({
     const hasChildren = !node.isLeaf;
 
     return (
-      <div className="category-tree__node" style={style} ref={dragHandle}>
+      <Group className="category-tree__node" style={style} ref={dragHandle} gap={4} wrap="nowrap">
         {hasChildren ? (
-          <button
-            type="button"
+          <ActionIcon
+            variant="subtle"
+            size="sm"
+            color="gray"
             className="category-tree__toggle"
             aria-label={node.isOpen ? "Collapse" : "Expand"}
             onClick={() => node.toggle()}
           >
             {node.isOpen ? "▾" : "▸"}
-          </button>
+          </ActionIcon>
         ) : (
           <span
             className="category-tree__toggle category-tree__toggle--spacer"
             aria-hidden="true"
+            style={{ display: "inline-block", width: "1.375rem" }}
           />
         )}
 
         {node.isEditing ? (
           <RenameInput node={node} />
         ) : (
-          <span
+          <Text
+            component="span"
             className={
               selectedNodeId === id
                 ? "category-tree__label category-tree__label--selected"
                 : "category-tree__label"
             }
+            fw={selectedNodeId === id ? 600 : 400}
+            style={{ cursor: "pointer", flex: 1 }}
             onClick={() => onNodeSelect(id)}
             onDoubleClick={() => {
               if (!isProtected) void node.edit();
             }}
           >
             {node.data.name}
-          </span>
+          </Text>
         )}
 
-        <span className="category-tree__actions">
-          <button
-            type="button"
+        <Group className="category-tree__actions" gap={2} wrap="nowrap">
+          <ActionIcon
+            variant="subtle"
+            size="sm"
             aria-label={`Add child to ${node.data.name}`}
             onClick={() => onAdd(id)}
           >
             +
-          </button>
+          </ActionIcon>
           {!isProtected && (
             <>
-              <button
-                type="button"
+              <Button
+                variant="subtle"
+                size="compact-xs"
                 aria-label={`Rename ${node.data.name}`}
                 onClick={() => void node.edit()}
               >
                 Rename
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="subtle"
+                size="compact-xs"
+                color="red"
                 aria-label={`Delete ${node.data.name}`}
                 onClick={() => onDelete(id)}
               >
                 Delete
-              </button>
+              </Button>
             </>
           )}
-        </span>
-      </div>
+        </Group>
+      </Group>
     );
   };
 

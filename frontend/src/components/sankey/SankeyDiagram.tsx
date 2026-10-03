@@ -1,3 +1,4 @@
+import { Paper, Text } from "@mantine/core";
 import ReactECharts from "echarts-for-react";
 
 import { useSankeyData } from "../../hooks/useSankeyData";
@@ -30,7 +31,12 @@ function buildOption(payload: SankeyPayload): Record<string, unknown> {
     series: [
       {
         type: "sankey",
-        layout: "none",
+        // `layoutIterations: 0` keeps nodes in the order the backend sends them
+        // (depth-first by category sort_order) instead of ECharts reordering to
+        // minimize crossings; `nodeAlign: "left"` places each node at its true
+        // depth so every tree level maps to one column.
+        layoutIterations: 0,
+        nodeAlign: "left",
         emphasis: { focus: "adjacency" },
         // ECharts keys nodes by `name`; we use the stable node id so links
         // (which reference ids) line up, and render the human label separately.
@@ -78,14 +84,18 @@ export function SankeyDiagram({ dateFrom, dateTo }: SankeyDiagramProps): JSX.Ele
 
   if (error) {
     return (
-      <p role="alert" className="sankey-diagram__error">
+      <Text role="alert" c="red" className="sankey-diagram__error">
         Failed to load diagram: {error.message}
-      </p>
+      </Text>
     );
   }
 
   if (!payload || payload.nodes.length === 0) {
-    return <p className="sankey-diagram__empty">No transactions in this period</p>;
+    return (
+      <Text c="dimmed" className="sankey-diagram__empty">
+        No transactions in this period
+      </Text>
+    );
   }
 
   const handleNodeClick = (params: SankeyClickParams): void => {
@@ -98,12 +108,12 @@ export function SankeyDiagram({ dateFrom, dateTo }: SankeyDiagramProps): JSX.Ele
   };
 
   return (
-    <div className="sankey-diagram">
+    <Paper className="sankey-diagram" withBorder radius="md" p="md">
       <ReactECharts
         option={buildOption(payload)}
         onEvents={{ click: handleNodeClick }}
         style={{ height: 500 }}
       />
-    </div>
+    </Paper>
   );
 }

@@ -1,3 +1,4 @@
+import { Button, Group, Input, Modal, NativeSelect, Stack, Text } from "@mantine/core";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 
@@ -49,67 +50,69 @@ export function ImportModal({ open, onClose }: ImportModalProps): JSX.Element | 
   const canSubmit = bankId !== "" && file !== null && !importCsv.isPending;
 
   return (
-    <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Import CSV"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="dialog__title">Import CSV</h2>
-        <form className="import-form" onSubmit={handleSubmit}>
-          <label className="import-form__field">
-            <span>Bank</span>
-            <select value={bankId} onChange={(e) => setBankId(e.target.value)}>
-              <option value="">Select a bank…</option>
-              {banks.map((bank) => (
-                <option key={bank.id} value={bank.id}>
-                  {bank.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="import-form__field">
-            <span>CSV file</span>
-            <input
+    <Modal
+      opened={open}
+      onClose={onClose}
+      withCloseButton={false}
+      className="dialog"
+      aria-label="Import CSV"
+      title="Import CSV"
+    >
+      <form className="import-form" onSubmit={handleSubmit}>
+        <Stack gap="sm">
+          <NativeSelect
+            label="Bank"
+            value={bankId}
+            onChange={(e) => setBankId(e.currentTarget.value)}
+          >
+            <option value="">Select a bank…</option>
+            {banks.map((bank) => (
+              <option key={bank.id} value={bank.id}>
+                {bank.name}
+              </option>
+            ))}
+          </NativeSelect>
+          <Input.Wrapper label="CSV file" className="import-form__field">
+            <Input
+              component="input"
               type="file"
               accept=".csv"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              aria-label="CSV file"
+              onChange={(e) => setFile(e.currentTarget.files?.[0] ?? null)}
             />
-          </label>
+          </Input.Wrapper>
 
-          <div className="dialog__actions">
-            <button type="button" onClick={onClose}>
+          <Group justify="flex-end" className="dialog__actions">
+            <Button variant="default" onClick={onClose}>
               Close
-            </button>
-            <button type="submit" className="dialog__confirm" disabled={!canSubmit}>
+            </Button>
+            <Button type="submit" className="dialog__confirm" disabled={!canSubmit}>
               {importCsv.isPending ? "Importing…" : "Import"}
-            </button>
-          </div>
-        </form>
+            </Button>
+          </Group>
+        </Stack>
+      </form>
 
-        {result && (
-          <div className="import-result" role="status">
-            <p className="import-result__summary">
-              {result.new_transactions} new, {result.duplicate_transactions} duplicates,{" "}
-              {result.failed_rows.length} failed
-            </p>
-            {result.failed_rows.length > 0 && (
-              <details open={showFailed} onToggle={(e) => setShowFailed(e.currentTarget.open)}>
-                <summary>Failed rows ({result.failed_rows.length})</summary>
-                <ul className="import-result__failed">
-                  {result.failed_rows.map((row) => (
-                    <li key={row.row_number}>
-                      Row {row.row_number}: {row.error}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+      {result && (
+        <div className="import-result" role="status">
+          <Text className="import-result__summary" mt="md">
+            {result.new_transactions} new, {result.duplicate_transactions} duplicates,{" "}
+            {result.failed_rows.length} failed
+          </Text>
+          {result.failed_rows.length > 0 && (
+            <details open={showFailed} onToggle={(e) => setShowFailed(e.currentTarget.open)}>
+              <summary>Failed rows ({result.failed_rows.length})</summary>
+              <ul className="import-result__failed">
+                {result.failed_rows.map((row) => (
+                  <li key={row.row_number}>
+                    Row {row.row_number}: {row.error}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }

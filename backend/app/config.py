@@ -2,12 +2,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    database_url: str = "sqlite:////data/wimm.db"
+    database_url: str = "sqlite:///wimm.db"
     sql_echo: bool = False
 
     log_level: str = "INFO"
     log_format: str = "text"
-    log_dir: str = "/logs/backend"
+    log_dir: str = "logs"
 
     ml_min_confidence: float = 0.3
     ml_min_training_samples: int = 5

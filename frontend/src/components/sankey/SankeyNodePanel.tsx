@@ -1,3 +1,5 @@
+import { Drawer, Group, NativeSelect, Stack, Text } from "@mantine/core";
+
 import { useCategoryTree } from "../../hooks/useCategoryTree";
 import { useMappings } from "../../hooks/useMappings";
 import { useTransactions } from "../../hooks/useTransactions";
@@ -38,39 +40,49 @@ export function SankeyNodePanel(): JSX.Element {
   const items = data?.items ?? [];
 
   return (
-    <aside
+    <Drawer
+      opened={sankeyPanel.open}
+      onClose={closeSankeyPanel}
+      position="right"
+      size="md"
       className="sankey-node-panel"
-      role="dialog"
-      aria-label={`${sankeyPanel.nodeName} details`}
+      title={`${sankeyPanel.nodeName} — Expenses`}
+      closeButtonProps={{ "aria-label": "Close panel" }}
     >
-      <header className="sankey-node-panel__header">
-        <h2>{sankeyPanel.nodeName} — Expenses</h2>
-        <button type="button" aria-label="Close panel" onClick={closeSankeyPanel}>
-          ×
-        </button>
-      </header>
-
       {isLoading ? (
         <LoadingSpinner label="Loading transactions…" />
       ) : error ? (
-        <p role="alert" className="sankey-node-panel__error">
+        <Text role="alert" c="red" className="sankey-node-panel__error">
           Failed to load transactions: {error.message}
-        </p>
+        </Text>
       ) : items.length === 0 ? (
-        <p className="sankey-node-panel__empty">No transactions in this category.</p>
+        <Text c="dimmed" className="sankey-node-panel__empty">
+          No transactions in this category.
+        </Text>
       ) : (
-        <ul className="sankey-node-panel__list">
+        <Stack gap="sm" className="sankey-node-panel__list">
           {items.map((tx) => (
-            <li key={tx.id} className="sankey-node-panel__row">
-              <span className="sankey-node-panel__date">{tx.date}</span>
-              <span className="sankey-node-panel__description">{tx.description}</span>
-              <span className="sankey-node-panel__amount">{formatAmount(tx.amount)}</span>
-              <select
+            <Group
+              key={tx.id}
+              className="sankey-node-panel__row"
+              justify="space-between"
+              wrap="nowrap"
+            >
+              <Text component="span" size="sm" className="sankey-node-panel__date">
+                {tx.date}
+              </Text>
+              <Text component="span" style={{ flex: 1 }} className="sankey-node-panel__description">
+                {tx.description}
+              </Text>
+              <Text component="span" className="sankey-node-panel__amount">
+                {formatAmount(tx.amount)}
+              </Text>
+              <NativeSelect
                 aria-label={`Category for ${tx.description}`}
                 value={tx.mapping?.category_id ?? ""}
                 onChange={(e) => {
-                  const categoryId = Number(e.target.value);
-                  if (e.target.value !== "" && !Number.isNaN(categoryId)) {
+                  const categoryId = Number(e.currentTarget.value);
+                  if (e.currentTarget.value !== "" && !Number.isNaN(categoryId)) {
                     createOrUpdateMapping.mutate(
                       { transaction_id: tx.id, category_id: categoryId },
                       { onSuccess: () => closeSankeyPanel() }
@@ -84,11 +96,11 @@ export function SankeyNodePanel(): JSX.Element {
                     {c.name}
                   </option>
                 ))}
-              </select>
-            </li>
+              </NativeSelect>
+            </Group>
           ))}
-        </ul>
+        </Stack>
       )}
-    </aside>
+    </Drawer>
   );
 }

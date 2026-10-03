@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
@@ -12,6 +13,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ["src/__tests__/setup.ts"],
     css: false,
+    // Playwright specs under e2e/ run via `playwright test`, not vitest.
+    exclude: [...configDefaults.exclude, "e2e/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

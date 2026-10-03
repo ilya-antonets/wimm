@@ -293,3 +293,28 @@ def test_zero_sum_direct_branch_has_no_orphan_node(db: Session) -> None:
     # Every node must be referenced by at least one link (no orphans).
     referenced = {link.source for link in payload.links} | {link.target for link in payload.links}
     assert all(node.id in referenced for node in payload.nodes)
+
+
+def test_category_nodes_follow_tree_order(db: Session) -> None:
+    # Category nodes must appear depth-first in sibling `sort_order` order so the
+    # diagram matches the expanded category tree and its links do not cross.
+    bank = BankFactory.create()
+    # Two roots created out of sort_order; a child under the first root.
+    beta = CategoryFactory.create(name="Beta", sort_order=1)
+    alpha = CategoryFactory.create(name="Alpha", sort_order=0)
+    alpha_child = CategoryFactory.create(name="AlphaChild", parent_id=alpha.id, sort_order=0)
+
+    # Spend only on the leaves — alpha stays a pure branch (no synthetic _direct node).
+    for cat in (alpha_child, beta):
+        tx = TransactionFactory.create(bank=bank, type="expense", amount=Decimal("-10.00"))
+        MappingFactory.create(transaction=tx, category=cat)
+
+    payload = svc.build_sankey(db, DATE_FROM, DATE_TO, _no_suggestions())
+
+    cat_order = [n.id for n in payload.nodes if n.id.startswith("cat_")]
+    # Depth-first: Alpha (sort_order 0) and its child before Beta (sort_order 1).
+    assert cat_order == [
+        f"cat_{alpha.id}",
+        f"cat_{alpha_child.id}",
+        f"cat_{beta.id}",
+    ]

@@ -1,20 +1,13 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { type ReactNode } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { SettingsPage } from "../../pages/SettingsPage";
 import { useAppStore } from "../../store/useAppStore";
+import { renderWithProviders } from "../hooks/testUtils";
 
 function renderPage(): ReturnType<typeof render> {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }): JSX.Element => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  );
-  return render(<SettingsPage />, { wrapper });
+  return renderWithProviders(<SettingsPage />, { withQuery: true });
 }
 
 describe("SettingsPage", () => {

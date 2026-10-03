@@ -1,13 +1,12 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SankeyDiagram } from "../../components/sankey/SankeyDiagram";
 import { useAppStore } from "../../store/useAppStore";
 import type { SankeyPayload } from "../../types";
+import { renderWithProviders } from "../hooks/testUtils";
 import { server } from "../mocks/server";
 
 const API = "http://localhost:8000/api";
@@ -36,13 +35,9 @@ const populated: SankeyPayload = {
 };
 
 function renderDiagram() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
+  return renderWithProviders(<SankeyDiagram dateFrom="2026-09-01" dateTo="2026-09-30" />, {
+    withQuery: true,
   });
-  const wrapper = ({ children }: { children: ReactNode }): JSX.Element => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  );
-  return render(<SankeyDiagram dateFrom="2026-09-01" dateTo="2026-09-30" />, { wrapper });
 }
 
 describe("SankeyDiagram", () => {

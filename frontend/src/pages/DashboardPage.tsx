@@ -1,3 +1,5 @@
+import { Container, Stack, Title } from "@mantine/core";
+
 import { SankeyDiagram } from "../components/sankey/SankeyDiagram";
 import { SankeyNodePanel } from "../components/sankey/SankeyNodePanel";
 import { DateRangePicker } from "../components/shared/DateRangePicker";
@@ -13,11 +15,13 @@ export function DashboardPage(): JSX.Element {
   const sankeyPanelOpen = useAppStore((s) => s.sankeyPanel.open);
 
   return (
-    <section className="page page--dashboard">
-      <h1>Dashboard</h1>
-      <DateRangePicker />
-      <SankeyDiagram dateFrom={dateRange.from} dateTo={dateRange.to} />
-      {sankeyPanelOpen && <SankeyNodePanel />}
-    </section>
+    <Container size="lg" className="page page--dashboard">
+      <Stack gap="md">
+        <Title order={1}>Dashboard</Title>
+        <DateRangePicker />
+        <SankeyDiagram dateFrom={dateRange.from} dateTo={dateRange.to} />
+        {sankeyPanelOpen && <SankeyNodePanel />}
+      </Stack>
+    </Container>
   );
 }
