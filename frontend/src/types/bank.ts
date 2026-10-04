@@ -3,6 +3,7 @@ export interface ColumnMap {
   amount: string | number;
   description: string | number;
   transaction_id?: string | number | null;
+  memo?: string | number | null;
 }
 
 export interface BankCreate {

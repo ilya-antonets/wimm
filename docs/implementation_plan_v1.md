@@ -153,8 +153,8 @@ None — the CI workflow is the deliverable. Enable branch protection on `main` 
 MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns `[]` until Stage 6).
 
 ### Files created
-- `backend/app/schemas/imports.py` — `FailedRow`, `ImportResult`
-- `backend/app/services/csv_importer.py` — `import_csv(db, bank, file_content, filename) -> ImportResult`: decode bytes → `pandas.read_csv` (skiprows/skipfooter, `engine='python'` — required for skipfooter) → rename via column_map → per-row parse (date, amount, type, dedup_key) → pre-SELECT existing dedup_keys → skip insert and return `import_batch_id=None` if no new rows → create `ImportBatch` → plain bulk `INSERT INTO`. Transaction boundary owned by the router (caller calls `db.commit()`). `_compute_dedup_key`: uses `bank_id:external_id` if `column_map.transaction_id` set and row tx_id is non-empty (empty tx_id fails the row); else `hex(SHA-256(bank_id|date|amount_2dp|description))`
+- `backend/app/schemas/imports.py` — `FailedRow`, `ImportResult` (includes `updated_transactions`)
+- `backend/app/services/csv_importer.py` — `import_csv(db, bank, file_content, filename) -> ImportResult`: decode bytes → `pandas.read_csv` (skiprows/skipfooter, `engine='python'` — required for skipfooter) → rename via column_map (incl. optional `memo`; a mapped-but-absent memo column is tolerated) → per-row parse (date, amount, type, dedup_key); empty description falls back to the `memo` value for storage, while the dedup_key hashes the **raw** description → pre-SELECT existing (dedup_key, description) → back-fill (UPDATE) existing rows whose stored description is empty, insert genuinely new rows (skip true duplicates); return `import_batch_id=None` when no new rows (updates may still have been applied) → create `ImportBatch` → plain bulk `INSERT INTO`. Transaction boundary owned by the router (caller calls `db.commit()`). `_compute_dedup_key`: uses `bank_id:external_id` if `column_map.transaction_id` set and row tx_id is non-empty (empty tx_id fails the row); else `hex(SHA-256(bank_id|date|amount_2dp|raw_description))`
 - `backend/app/services/ml_suggester.py` — `MLSuggester` with `threading.Lock`, `invalidate()`, stub `suggest()`, `get_suggester()` singleton with double-checked locking
 - `backend/app/routers/imports.py` — `POST /api/import` (multipart: `bank_id` int + `file` UploadFile, validates `.csv`, calls `import_csv`, calls `get_suggester().invalidate()`, returns 201/200/400)
 - `backend/tests/test_csv_importer.py`, `backend/tests/routers/test_imports.py`
@@ -163,7 +163,7 @@ MLSuggester introduced as a **stub** (`invalidate()` works; `suggest()` returns 
 - `backend/app/main.py` — register `imports.router`, call `get_suggester()` at lifespan for eager singleton init (result not stored on `app.state`)
 
 ### Tests
-`test_csv_importer.py` (9 cases): basic import, dedup by hash, dedup by external ID, skip rows, income/expense sign detection, latin-1 encoding, invalid date format, missing required column  
+`test_csv_importer.py`: basic import, dedup by hash, dedup by external ID, skip rows, income/expense sign detection, latin-1 encoding, invalid date format, missing required column, plus memo-fallback cases (memo fills empty description; reimport back-fills empty description for both hash and transaction_id dedup; idempotent reimport; non-empty description not overwritten; mapped-but-absent memo column tolerated)  
 `test_imports.py` (5 cases): valid upload (201), duplicate upload (200), wrong bank ID (404), malformed CSV (400), upload triggers ML cache invalidation (`get_suggester().invalidate()` called)
 
 ---
@@ -283,7 +283,7 @@ Initial date range is current month, setDateRange updates store, openSankeyPanel
 - `frontend/src/services/bankService.ts`, `importService.ts`
 - `frontend/src/hooks/useBanks.ts` — query `["banks"]`; mutations createBank, updateBank, deleteBank (deleteBank also invalidates `["transactions"]`)
 - `frontend/src/hooks/useImport.ts` — mutation `importCsv`; on success invalidates `["transactions"]` + `["sankey"]`
-- `frontend/src/components/banks/BankConfigModal.tsx` — create/edit mode; form: name, date_format, encoding, skip rows, column_map (4 fields); Delete with ConfirmDialog; 409 → error toast
+- `frontend/src/components/banks/BankConfigModal.tsx` — create/edit mode; form: name, date_format, encoding, skip rows, column_map (5 fields incl. optional `memo`); Delete with ConfirmDialog; 409 → error toast
 - `frontend/src/components/import/ImportModal.tsx` — bank `<select>`, file input `accept=".csv"`, inline result summary + collapsible `failed_rows`, error → toast stays open
 - `frontend/src/pages/SettingsPage.tsx` — bank list with edit buttons, Add Bank, Import CSV trigger
 

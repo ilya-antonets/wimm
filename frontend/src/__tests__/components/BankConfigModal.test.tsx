@@ -102,8 +102,35 @@ describe("BankConfigModal", () => {
     });
   });
 
-  it("shows a validation toast and does not close when required fields are blank", async () => {
+  it("includes the optional memo column in the payload when provided", async () => {
     const user = userEvent.setup();
+    type PostBody = { column_map?: Record<string, unknown> };
+    let posted: PostBody | null = null;
+    server.use(
+      http.post(`${API}/banks`, async ({ request }) => {
+        posted = (await request.json()) as PostBody;
+        return HttpResponse.json({ id: 2, ...posted }, { status: 201 });
+      })
+    );
+
+    const { onClose } = renderModal(null);
+    // Text inputs in DOM order: Name, Date format, Encoding, Date column,
+    // Amount column, Description column, Transaction ID column, Memo column.
+    const textboxes = screen.getAllByRole("textbox");
+    await user.type(textboxes[0]!, "New Bank");
+    await user.type(textboxes[1]!, "%Y-%m-%d");
+    await user.type(textboxes[3]!, "Date");
+    await user.type(textboxes[4]!, "Amount");
+    await user.type(textboxes[5]!, "Description");
+    await user.type(textboxes[7]!, "Memo");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect((posted as PostBody | null)?.column_map).toMatchObject({ memo: "Memo" });
+  });
+
+  it("shows a validation toast and does not close when required fields are blank", async () => {    const user = userEvent.setup();
     const errorSpy = vi.spyOn(toast, "error").mockImplementation(() => "");
 
     const { onClose } = renderModal(null);

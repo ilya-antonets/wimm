@@ -172,3 +172,116 @@ def test_transaction_id_column_not_in_csv(db: Session) -> None:
     csv = b"date,amount,desc\n2024-01-15,-50.00,Coffee"
     with pytest.raises(ValidationError, match="transaction_id column"):
         import_csv(db, bank, csv, "test.csv")
+
+
+def test_memo_fills_empty_description(db: Session) -> None:
+    bank = BankFactory.create()
+    bank.column_map = {"date": 0, "amount": 1, "description": 2, "memo": 3}
+    db.commit()
+    csv = (
+        b"date,amount,description,memo\n"
+        b"2024-01-15,-50.00,,ATM withdrawal\n"
+        b"2024-01-16,-30.00,Coffee,Latte memo"
+    )
+    result = import_csv(db, bank, csv, "test.csv")
+    assert result.new_transactions == 2
+    txs = list(db.scalars(select(Transaction).order_by(Transaction.id)))
+    # Empty description falls back to the memo value.
+    assert txs[0].description == "ATM withdrawal"
+    # Non-empty description is kept; memo is ignored.
+    assert txs[1].description == "Coffee"
+
+
+def test_reimport_backfills_empty_description_from_memo(db: Session) -> None:
+    bank = BankFactory.create()
+    # First import without a memo mapping: empty description is stored as "".
+    bank.column_map = {"date": 0, "amount": 1, "description": 2}
+    db.commit()
+    csv_no_memo = b"date,amount,description,memo\n2024-01-15,-50.00,,ATM withdrawal"
+    first = import_csv(db, bank, csv_no_memo, "first.csv")
+    assert first.new_transactions == 1
+    tx = db.scalars(select(Transaction)).one()
+    assert tx.description == ""
+
+    # Reimport with memo mapped: the raw (empty) description keeps the dedup key stable,
+    # so the existing row is updated rather than inserted anew.
+    bank.column_map = {"date": 0, "amount": 1, "description": 2, "memo": 3}
+    db.commit()
+    second = import_csv(db, bank, csv_no_memo, "second.csv")
+    assert second.new_transactions == 0
+    assert second.updated_transactions == 1
+    assert second.duplicate_transactions == 0
+    txs = list(db.scalars(select(Transaction)))
+    assert len(txs) == 1
+    assert txs[0].description == "ATM withdrawal"
+
+
+def test_reimport_backfills_description_transaction_id_dedup(db: Session) -> None:
+    bank = BankFactory.create()
+    bank.column_map = {"date": 0, "amount": 1, "description": 2, "transaction_id": 3}
+    db.commit()
+    csv_no_memo = b"date,amount,description,tx_id\n2024-01-15,-50.00,,TX001"
+    first = import_csv(db, bank, csv_no_memo, "first.csv")
+    assert first.new_transactions == 1
+    assert db.scalars(select(Transaction)).one().description == ""
+
+    bank.column_map = {
+        "date": 0,
+        "amount": 1,
+        "description": 2,
+        "transaction_id": 3,
+        "memo": 4,
+    }
+    db.commit()
+    csv_memo = b"date,amount,description,tx_id,memo\n2024-01-15,-50.00,,TX001,Wire transfer"
+    second = import_csv(db, bank, csv_memo, "second.csv")
+    assert second.new_transactions == 0
+    assert second.updated_transactions == 1
+    txs = list(db.scalars(select(Transaction)))
+    assert len(txs) == 1
+    assert txs[0].description == "Wire transfer"
+
+
+def test_reimport_memo_backfill_is_idempotent(db: Session) -> None:
+    bank = BankFactory.create()
+    bank.column_map = {"date": 0, "amount": 1, "description": 2, "memo": 3}
+    db.commit()
+    csv = b"date,amount,description,memo\n2024-01-15,-50.00,,ATM withdrawal"
+    import_csv(db, bank, csv, "first.csv")
+    result = import_csv(db, bank, csv, "second.csv")
+    assert result.new_transactions == 0
+    assert result.updated_transactions == 0
+    assert result.duplicate_transactions == 1
+
+
+def test_reimport_does_not_overwrite_non_empty_description(db: Session) -> None:
+    bank = BankFactory.create()
+    bank.column_map = {"date": 0, "amount": 1, "description": 2, "transaction_id": 3}
+    db.commit()
+    csv_first = b"date,amount,description,tx_id\n2024-01-15,-50.00,Coffee,TX001"
+    import_csv(db, bank, csv_first, "first.csv")
+
+    bank.column_map = {
+        "date": 0,
+        "amount": 1,
+        "description": 2,
+        "transaction_id": 3,
+        "memo": 4,
+    }
+    db.commit()
+    # Description is still non-empty; a memo must not clobber it.
+    csv_second = b"date,amount,description,tx_id,memo\n2024-01-15,-50.00,Coffee,TX001,Some memo"
+    result = import_csv(db, bank, csv_second, "second.csv")
+    assert result.updated_transactions == 0
+    assert db.scalars(select(Transaction)).one().description == "Coffee"
+
+
+def test_memo_column_absent_from_csv_is_tolerated(db: Session) -> None:
+    bank = BankFactory.create()
+    bank.column_map = {"date": 0, "amount": 1, "description": 2, "memo": "memo"}
+    db.commit()
+    # File lacks the mapped memo column; import should still succeed.
+    csv = b"date,amount,description\n2024-01-15,-50.00,Coffee"
+    result = import_csv(db, bank, csv, "test.csv")
+    assert result.new_transactions == 1
+    assert db.scalars(select(Transaction)).one().description == "Coffee"

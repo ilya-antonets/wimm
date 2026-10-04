@@ -5,7 +5,7 @@ from io import StringIO
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session
 
 from app.exceptions import ValidationError
@@ -57,12 +57,23 @@ def import_csv(
         except (ValueError, KeyError) as e:
             raise ValidationError(f"Column mapping error for transaction_id: {e}") from e
 
+    memo_col: str | None = None
+    raw_memo_ref = column_map.get("memo")
+    if raw_memo_ref is not None:
+        try:
+            memo_col = _normalize_column_ref(raw_memo_ref, columns)
+        except (ValueError, KeyError) as e:
+            raise ValidationError(f"Column mapping error for memo: {e}") from e
+
     # 4. Verify required columns exist in DataFrame
     missing = [col for col in [date_col, amount_col, desc_col] if col not in df.columns]
     if missing:
         raise ValidationError(f"Columns not found in CSV: {missing}")
     if tx_id_col is not None and tx_id_col not in df.columns:
         raise ValidationError(f"transaction_id column '{tx_id_col}' not found in CSV")
+    # Memo is an optional enrichment: tolerate files that lack the mapped memo column.
+    if memo_col is not None and memo_col not in df.columns:
+        memo_col = None
 
     # 5. Per-row parsing
     valid_rows: list[dict[str, Any]] = []
@@ -90,7 +101,12 @@ def import_csv(
             continue
 
         tx_type = "income" if amount > 0 else "expense"
-        description = str(row[desc_col]).strip()
+        raw_description = str(row[desc_col]).strip()
+        description = raw_description
+        if not description and memo_col is not None:
+            memo_val = str(row[memo_col]).strip()
+            if memo_val:
+                description = memo_val
 
         if tx_id_col is not None:
             tx_id_val = str(row[tx_id_col]).strip()
@@ -101,7 +117,7 @@ def import_csv(
                 continue
             dedup_key = f"{bank.id}:{tx_id_val}"
         else:
-            dedup_key = _compute_dedup_key(bank.id, str(date_val), amount, description)
+            dedup_key = _compute_dedup_key(bank.id, str(date_val), amount, raw_description)
 
         valid_rows.append(
             {
@@ -120,27 +136,44 @@ def import_csv(
         raise ValidationError(f"No parseable rows found in CSV. {summary}")
 
     # 7. Pre-filter known duplicates with a portable SELECT
-    existing_keys: set[str] = set(
-        db.scalars(
-            select(Transaction.dedup_key).where(
-                Transaction.dedup_key.in_([r["dedup_key"] for r in valid_rows])
-            )
+    existing = db.execute(
+        select(Transaction.dedup_key, Transaction.description).where(
+            Transaction.dedup_key.in_([r["dedup_key"] for r in valid_rows])
         )
-    )
-    new_rows = [r for r in valid_rows if r["dedup_key"] not in existing_keys]
-    duplicate_count = len(valid_rows) - len(new_rows)
+    ).all()
+    existing_desc: dict[str, str] = dict(existing)
 
-    # 8. Return early when every row is a duplicate (no batch row created)
+    new_rows = [r for r in valid_rows if r["dedup_key"] not in existing_desc]
+    # Back-fill previously-empty descriptions from memo; never overwrite a non-empty one.
+    update_rows = [
+        r
+        for r in valid_rows
+        if r["dedup_key"] in existing_desc
+        and existing_desc[r["dedup_key"]] == ""
+        and r["description"] != ""
+    ]
+    duplicate_count = len(valid_rows) - len(new_rows) - len(update_rows)
+
+    # 8. Apply description back-fills to existing rows
+    for r in update_rows:
+        db.execute(
+            update(Transaction)
+            .where(Transaction.dedup_key == r["dedup_key"])
+            .values(description=r["description"])
+        )
+
+    # 9. Return early when there are no new rows (updates, if any, are already applied)
     if not new_rows:
         return ImportResult(
             import_batch_id=None,
             total_rows_parsed=len(valid_rows) + len(failed_rows),
             new_transactions=0,
+            updated_transactions=len(update_rows),
             duplicate_transactions=duplicate_count,
             failed_rows=failed_rows,
         )
 
-    # 9. Create ImportBatch; flush to get id
+    # 10. Create ImportBatch; flush to get id
     import_batch = ImportBatch(bank_id=bank.id, filename=filename)
     db.add(import_batch)
     db.flush()
@@ -148,13 +181,14 @@ def import_csv(
     for tx_row in new_rows:
         tx_row["import_batch_id"] = import_batch.id
 
-    # 10. Bulk INSERT (plain — no dialect-specific conflict clause needed)
+    # 11. Bulk INSERT (plain — no dialect-specific conflict clause needed)
     db.execute(insert(Transaction).values(new_rows))
 
     return ImportResult(
         import_batch_id=import_batch.id,
         total_rows_parsed=len(valid_rows) + len(failed_rows),
         new_transactions=len(new_rows),
+        updated_transactions=len(update_rows),
         duplicate_transactions=duplicate_count,
         failed_rows=failed_rows,
     )
