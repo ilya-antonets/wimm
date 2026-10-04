@@ -38,7 +38,7 @@ describe("useSankeyData", () => {
       })
     );
 
-    const { result } = renderHookWithQuery(() => useSankeyData("2026-09-01", "2026-09-30"));
+    const { result } = renderHookWithQuery(() => useSankeyData("2026-09-01", "2026-09-30", 0.3));
 
     await waitFor(() => expect(result.current.payload?.nodes).toHaveLength(3));
     expect(requested).toEqual({ from: "2026-09-01", to: "2026-09-30" });
@@ -54,7 +54,7 @@ describe("useSankeyData", () => {
     );
 
     const { result, rerender } = renderHookWithQuery(
-      ({ from, to }: { from: string; to: string }) => useSankeyData(from, to),
+      ({ from, to }: { from: string; to: string }) => useSankeyData(from, to, 0.3),
       { initialProps: { from: "2026-09-01", to: "2026-09-30" } }
     );
 
@@ -74,7 +74,7 @@ describe("useSankeyData", () => {
       })
     );
 
-    const { result } = renderHookWithQuery(() => useSankeyData("", "2026-09-30"));
+    const { result } = renderHookWithQuery(() => useSankeyData("", "2026-09-30", 0.3));
 
     expect(result.current.isLoading).toBe(false);
     expect(result.current.payload).toBeUndefined();
@@ -98,11 +98,11 @@ describe("useSankeyData", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
 
-    const first = renderHook(() => useSankeyData("2026-09-01", "2026-09-30"), { wrapper });
+    const first = renderHook(() => useSankeyData("2026-09-01", "2026-09-30", 0.3), { wrapper });
     await waitFor(() => expect(first.result.current.payload).toBeDefined());
     expect(hits).toBe(1);
 
-    const second = renderHook(() => useSankeyData("2026-09-01", "2026-09-30"), { wrapper });
+    const second = renderHook(() => useSankeyData("2026-09-01", "2026-09-30", 0.3), { wrapper });
     await waitFor(() => expect(second.result.current.payload).toBeDefined());
     expect(hits).toBe(1);
   });

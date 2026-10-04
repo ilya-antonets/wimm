@@ -174,6 +174,28 @@ def test_low_confidence_suggestion_goes_to_uncategorized(db: Session) -> None:
     assert uncategorized is not None and uncategorized.transaction_ids == [tx.id]
 
 
+def test_low_confidence_accepted_when_threshold_lowered(db: Session) -> None:
+    bank = BankFactory.create()
+    groceries = CategoryFactory.create(name="Groceries")
+    tx = TransactionFactory.create(bank=bank, type="expense", amount=Decimal("-50.00"))
+    suggester = MagicMock()
+    suggester.suggest.return_value = [
+        SuggestionResult(
+            transaction_id=tx.id,
+            suggested_category_id=groceries.id,
+            suggested_category_name="Groceries",
+            confidence=0.1,
+            method="tfidf",
+        )
+    ]
+
+    payload = svc.build_sankey(db, DATE_FROM, DATE_TO, suggester, min_confidence=0.0)
+
+    assert _node(payload.nodes, "cat_1") is None
+    groceries_node = _node(payload.nodes, f"cat_{groceries.id}")
+    assert groceries_node is not None and groceries_node.transaction_ids == [tx.id]
+
+
 def test_unmapped_with_no_ml_data_uncategorized(db: Session) -> None:
     bank = BankFactory.create()
     tx = TransactionFactory.create(bank=bank, type="expense", amount=Decimal("-25.00"))

@@ -87,7 +87,7 @@ Components in `src/components/` contain no business logic and make no direct API
 
 ## 4. Data Model
 
-Five tables. The category tree uses an **adjacency list** — the simplest representation for a mutable tree in a relational DB. SQLite's `WITH RECURSIVE` CTEs handle subtree traversal and aggregation efficiently.
+Six tables. The category tree uses an **adjacency list** — the simplest representation for a mutable tree in a relational DB. SQLite's `WITH RECURSIVE` CTEs handle subtree traversal and aggregation efficiently.
 
 ### 4.1 Table definitions
 
@@ -141,6 +141,15 @@ Five tables. The category tree uses an **adjacency list** — the simplest repre
 | id | INTEGER PK | |
 | transaction_id | INTEGER UNIQUE FK → transactions | Enforces one-category-per-expense constraint |
 | category_id | FK → categories | |
+
+**user_preferences** _(singleton — always contains exactly one row with id=1)_
+
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | Always 1; enforced by the row seeded in migration `002` |
+| ml_min_confidence | REAL NOT NULL | Minimum ML confidence for a suggestion to be auto-applied in the Sankey diagram; default 0.3 |
+
+This table stores user-tunable preferences. The router creates the row on first `GET /api/preferences` if it is absent (guard against fresh installs where the migration was not run), and seeds it with `ml_min_confidence = 0.3` in migration `002_user_preferences`.
 
 ### 4.2 Deduplication
 
@@ -262,13 +271,26 @@ POST /api/suggestions   { transaction_ids: [...] }
 
 POST /api/mappings      { transaction_id, category_id }   (user accepts or overrides)
   → 201 Created
+
+GET  /api/preferences   → { ml_min_confidence: float }
+PUT  /api/preferences   { ml_min_confidence: float }  → { ml_min_confidence: float }
 ```
+
+`ml_min_confidence` controls the threshold at which ML-implied category assignments are accepted in the Sankey diagram. It is stored in the `user_preferences` table (not in environment config) so the user can change it at runtime via the confidence slider in the UI. The `ML_MIN_CONFIDENCE` environment variable is used only as the compiled-in default; the DB value overrides it once a user preference is saved.
 
 ---
 
 ## 7. Sankey Diagram
 
 The Sankey diagram is assembled server-side and delivered to the frontend as a ready-to-render `{ nodes, links }` payload for ECharts.
+
+**Query parameters:**
+
+| Param | Required | Description |
+|---|---|---|
+| `date_from` | yes | Start of period (inclusive, YYYY-MM-DD) |
+| `date_to` | yes | End of period (inclusive, YYYY-MM-DD) |
+| `min_confidence` | no | ML confidence threshold override (float 0–1); defaults to `settings.ml_min_confidence`. The frontend passes the value loaded from `GET /api/preferences` so that the user-configured threshold is applied. |
 
 **Node structure for a given period:**
 
@@ -342,13 +364,19 @@ Once implementation begins, these are the critical files to create or modify:
 
 | File | Purpose |
 |---|---|
-| `backend/app/models.py` | SQLAlchemy ORM definitions for all five tables, including the self-referential `categories` relationship and the `dedup_key` unique constraint |
+| `backend/app/models.py` | SQLAlchemy ORM definitions for all six tables, including the self-referential `categories` relationship, the `dedup_key` unique constraint, and the `UserPreference` singleton |
 | `backend/alembic/versions/001_initial_schema.py` | Initial migration: creates all tables and seeds the "Uncategorized" category (id=1) |
+| `backend/alembic/versions/002_user_preferences.py` | Adds `user_preferences` table; seeds singleton row with `ml_min_confidence = 0.3` |
+| `backend/app/schemas/preferences.py` | `PreferencesRead` / `PreferencesWrite` Pydantic schemas; `PreferencesWrite` validates 0.0 ≤ value ≤ 1.0 |
+| `backend/app/routers/preferences.py` | `GET /api/preferences` and `PUT /api/preferences`; auto-creates the singleton row on first `GET` if absent |
 | `backend/app/services/csv_importer.py` | pandas-based CSV parser; applies `skip_header_rows`/`skip_footer_rows`/`encoding` from `banks.column_map`; computes `dedup_key`; inserts new rows and back-fills empty descriptions from the optional `memo` column on reimport (pre-SELECT by `dedup_key`, not `INSERT OR IGNORE`) |
 | `backend/app/services/ml_suggester.py` | TF-IDF vectorizer, payee fingerprint cache, cosine similarity pipeline |
-| `backend/app/routers/sankey.py` | Assembles `{ nodes, links }` payload via recursive CTE aggregation for a given date range |
-| `frontend/src/components/SankeyDiagram.tsx` | ECharts Sankey wrapper; renders the payload from `/api/sankey` |
+| `backend/app/routers/sankey.py` | Assembles `{ nodes, links }` payload via recursive CTE aggregation for a given date range; accepts optional `min_confidence` query param that overrides the compiled-in default |
+| `frontend/src/services/preferencesService.ts` | `fetchPreferences` / `savePreferences` API helpers |
+| `frontend/src/hooks/usePreferences.ts` | `usePreferences()` (staleTime: Infinity) and `useUpdatePreferences()` TanStack Query hooks |
+| `frontend/src/components/shared/ConfidenceSlider.tsx` | Shared Mantine `<Slider>` component used on both Dashboard and Transactions pages; local state for smooth drag, `onChangeEnd` fires the PUT mutation |
+| `frontend/src/components/SankeyDiagram.tsx` | ECharts Sankey wrapper; renders the payload from `/api/sankey`; accepts `minConfidence` prop |
 | `frontend/src/components/CategoryTree.tsx` | react-arborist tree editor for create/rename/remove category operations |
-| `frontend/src/hooks/useSankeyData.ts` | TanStack Query hook that fetches and caches the Sankey payload |
+| `frontend/src/hooks/useSankeyData.ts` | TanStack Query hook that fetches and caches the Sankey payload; query key includes `minConfidence` so threshold changes trigger a refetch |
 | `docker-compose.yml` | Service definitions, volume mounts, port bindings |
 | `alembic/env.py` | Must include `render_as_batch=True` for SQLite batch migration support |

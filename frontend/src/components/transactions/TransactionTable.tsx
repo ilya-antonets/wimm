@@ -32,6 +32,7 @@ const PAGE_SIZES = [25, 50, 100];
 
 interface TransactionTableProps {
   filterCategoryId: number | null;
+  minConfidence: number;
 }
 
 function formatAmount(amount: string): string {
@@ -48,7 +49,10 @@ const columnHelper = createColumnHelper<TransactionRead>();
  * category tree selection (`filterCategoryId`) and the shared date range narrow
  * the query.
  */
-export function TransactionTable({ filterCategoryId }: TransactionTableProps): JSX.Element {
+export function TransactionTable({
+  filterCategoryId,
+  minConfidence,
+}: TransactionTableProps): JSX.Element {
   const dateRange = useAppStore((s) => s.dateRange);
 
   const [page, setPage] = useState(1);
@@ -188,8 +192,14 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
           if (tx.type !== "expense" || tx.mapping != null) return null;
           const suggestion: SuggestionResult | undefined = suggestions.get(tx.id);
           if (!suggestion) return null;
+          const belowThreshold = suggestion.confidence < minConfidence;
           return (
-            <Group className="suggestion-badge" gap="xs" wrap="nowrap">
+            <Group
+              className={`suggestion-badge${belowThreshold ? " suggestion-badge--low" : ""}`}
+              gap="xs"
+              wrap="nowrap"
+              style={{ opacity: belowThreshold ? 0.45 : undefined }}
+            >
               <span className="suggestion-badge__name">{suggestion.suggested_category_name}</span>
               <span className="suggestion-badge__confidence">
                 {Math.round(suggestion.confidence * 100)}%
@@ -212,7 +222,7 @@ export function TransactionTable({ filterCategoryId }: TransactionTableProps): J
         },
       }),
     ],
-    [categories, suggestions, createOrUpdateMapping, deleteMapping]
+    [categories, suggestions, createOrUpdateMapping, deleteMapping, minConfidence]
   );
 
   const table = useReactTable({

@@ -36,7 +36,8 @@
   │   ├── env.py                        # render_as_batch=True, imports Base.metadata
   │   ├── script.py.mako
   │   └── versions/
-  │       └── 001_initial_schema.py     # Creates all 5 tables; seeds Uncategorized (id=1)
+  │       ├── 001_initial_schema.py     # Creates all 5 tables; seeds Uncategorized (id=1)
+  │       └── 002_user_preferences.py   # Adds user_preferences table; seeds singleton row
   └── app/
       ├── __init__.py
       ├── main.py                        # FastAPI app factory, lifespan, router registration
@@ -53,7 +54,8 @@
       │   ├── categories.py              # CRUD + tree endpoints
       │   ├── mappings.py                # Create / update category mappings
       │   ├── suggestions.py             # ML suggestion endpoint
-      │   └── sankey.py                  # Sankey payload assembly
+      │   ├── sankey.py                  # Sankey payload assembly
+      │   └── preferences.py             # GET/PUT /api/preferences (ml_min_confidence)
       ├── schemas/
       │   ├── __init__.py
       │   ├── banks.py
@@ -62,7 +64,8 @@
       │   ├── categories.py
       │   ├── mappings.py
       │   ├── suggestions.py
-      │   └── sankey.py
+      │   ├── sankey.py
+      │   └── preferences.py             # PreferencesRead / PreferencesWrite
       └── services/
           ├── __init__.py
           ├── csv_importer.py
@@ -80,7 +83,7 @@
   from app.database import engine
   from app import models
   from app.exceptions import register_exception_handlers
-  from app.routers import banks, imports, transactions, categories, mappings, suggestions, sankey
+  from app.routers import banks, imports, transactions, categories, mappings, preferences, suggestions, sankey
   
   @asynccontextmanager
   async def lifespan(app: FastAPI):
@@ -112,6 +115,7 @@
   app.include_router(transactions.router)
   app.include_router(categories.router)
   app.include_router(mappings.router)
+  app.include_router(preferences.router)
   app.include_router(suggestions.router)
   app.include_router(sankey.router)
   ```
@@ -612,6 +616,7 @@
   |---|---|---|---|
   | `date_from` | `date` | yes | Start of period (inclusive) |
   | `date_to` | `date` | yes | End of period (inclusive) |
+  | `min_confidence` | `float` | no | ML confidence threshold (0.0–1.0); defaults to `settings.ml_min_confidence` (0.3). The frontend passes the user-stored preference from `GET /api/preferences`. |
   
   - **Response 200:** `SankeyPayload`
   
@@ -644,6 +649,63 @@
   
   - **Error 400:** `date_from > date_to`.
   - **Response 200 with empty nodes/links:** When no transactions exist in the period — returns `{ nodes: [], links: [], period_income: 0, period_expenses: 0, balance: 0 }`. Frontend renders an empty state placeholder.
+  
+  ---
+  
+  ### 2.8 Preferences
+  
+  #### `GET /api/preferences`
+  
+  Returns the singleton user preferences row (id=1). Creates it with defaults if absent (safe for fresh installs where the migration was not yet applied).
+  
+  - **Response 200:** `PreferencesRead`
+  
+  ```python
+  # schemas/preferences.py
+  
+  class PreferencesRead(BaseModel):
+      ml_min_confidence: float
+      model_config = {"from_attributes": True}
+  ```
+  
+  #### `PUT /api/preferences`
+  
+  Overwrites the singleton preferences row.
+  
+  - **Request body:** `PreferencesWrite`
+  
+  ```python
+  class PreferencesWrite(BaseModel):
+      ml_min_confidence: float = Field(..., ge=0.0, le=1.0)
+  ```
+  
+  - **Response 200:** `PreferencesRead`
+  - **Error 422:** `ml_min_confidence` outside 0.0–1.0 range.
+  
+  **Router implementation note:**
+  
+  ```python
+  # routers/preferences.py
+  router = APIRouter(prefix="/api/preferences", tags=["preferences"])
+  
+  def _get_or_create(db: Session) -> UserPreference:
+      row = db.get(UserPreference, 1)
+      if row is None:
+          row = UserPreference(id=1)
+          db.add(row); db.commit(); db.refresh(row)
+      return row
+  
+  @router.get("", response_model=PreferencesRead)
+  def get_preferences(db: Session = Depends(get_db)) -> UserPreference:
+      return _get_or_create(db)
+  
+  @router.put("", response_model=PreferencesRead)
+  def update_preferences(body: PreferencesWrite, db: Session = Depends(get_db)) -> UserPreference:
+      row = _get_or_create(db)
+      row.ml_min_confidence = body.ml_min_confidence
+      db.commit(); db.refresh(row)
+      return row
+  ```
   
   ---
   
@@ -926,6 +988,7 @@
       date_from: date,
       date_to: date,
       suggester: MLSuggester,
+      min_confidence: float = settings.ml_min_confidence,
   ) -> SankeyPayload:
       """
       Assembles the complete Sankey payload for ECharts.
@@ -938,8 +1001,8 @@
       suggester.suggest(db, unmapped_ids) to assign a best-guess category
       for the diagram.
       Confidence rules:
-        - confidence >= settings.ml_min_confidence → use suggested category_id
-        - confidence < settings.ml_min_confidence → fall back to Uncategorized (id=1)
+        - confidence >= min_confidence → use suggested category_id
+        - confidence < min_confidence → fall back to Uncategorized (id=1)
         - ML returns no result (no training data) → fall back to Uncategorized
         - ML returns deleted category_id → fall back to Uncategorized (safety net)
   
@@ -965,13 +1028,14 @@
       date_from: date,
       date_to: date,
       suggester: MLSuggester,
+      min_confidence: float = settings.ml_min_confidence,
   ) -> tuple[list[SankeyNode], list[SankeyLink], Decimal]:
       """
       1. Loads all categories into an in-memory cat_map (id -> Category).
       2. Queries all expense transactions in period with their explicit mapping (LEFT JOIN).
       3. Collects unmapped transaction IDs; calls suggester.suggest() to get ML-implied
          category_id for each. Validates each ML-returned category_id against cat_map;
-         falls back to UNCATEGORIZED_ID if not found (or below confidence threshold).
+         falls back to UNCATEGORIZED_ID if not found or below the min_confidence threshold.
       4. Merges explicit and ML-implied category assignments.
       5. Aggregates absolute totals per category and rolls them up the parent chain in
          Python via cat_map (no recursive CTE), marking every ancestor visible.
@@ -1123,6 +1187,13 @@
       __table_args__ = (
           Index("ix_mappings_category_id", "category_id"),
       )
+  
+  
+  class UserPreference(Base):
+      __tablename__ = "user_preferences"
+  
+      id:                Mapped[int]   = mapped_column(Integer, primary_key=True, default=1)
+      ml_min_confidence: Mapped[float] = mapped_column(nullable=False, default=0.3)
   ```
   
   **Initial migration (`alembic/versions/001_initial_schema.py`) must include this seed data step in `upgrade()`:**
@@ -1172,7 +1243,8 @@
       │   ├── categoryService.ts
       │   ├── mappingService.ts
       │   ├── suggestionService.ts
-      │   └── sankeyService.ts
+      │   ├── sankeyService.ts
+      │   └── preferencesService.ts         # fetchPreferences / savePreferences
       ├── utils/
       │   └── logger.ts                     # Console wrapper with log-level control
       ├── hooks/
@@ -1182,7 +1254,8 @@
       │   ├── useCategoryTree.ts
       │   ├── useMappings.ts
       │   ├── useSuggestions.ts
-      │   └── useSankeyData.ts
+      │   ├── useSankeyData.ts
+      │   └── usePreferences.ts             # usePreferences / useUpdatePreferences
       ├── store/
       │   └── useAppStore.ts               # Single Zustand store
       ├── components/
@@ -1203,11 +1276,12 @@
       │   │   └── SankeyNodePanel.tsx
       │   └── shared/
       │       ├── DateRangePicker.tsx
+      │       ├── ConfidenceSlider.tsx      # Mantine Slider for ml_min_confidence; shared by Dashboard + Transactions
       │       ├── ConfirmDialog.tsx
       │       └── LoadingSpinner.tsx
       └── pages/
-          ├── DashboardPage.tsx            # Sankey + DateRangePicker
-          ├── TransactionsPage.tsx         # TransactionTable + CategoryPanel
+          ├── DashboardPage.tsx            # Sankey + DateRangePicker + ConfidenceSlider
+          ├── TransactionsPage.tsx         # TransactionTable + CategoryPanel + ConfidenceSlider
           └── SettingsPage.tsx             # BankConfigModal list + ImportModal trigger
   ```
   
@@ -1269,17 +1343,19 @@
   ```
   DashboardPage
   ├── DateRangePicker            (reads/writes store.dateRange)
-  └── SankeyDiagram              (consumes useSankeyData)
+  ├── ConfidenceSlider           (reads/writes usePreferences → PUT /api/preferences)
+  └── SankeyDiagram              (consumes useSankeyData; receives minConfidence from usePreferences)
   ```
   
   **`/transactions` — `TransactionsPage`**
   
   ```
   TransactionsPage
+  ├── ConfidenceSlider           (reads/writes usePreferences → PUT /api/preferences)
   ├── CategoryPanel              (left sidebar, ~280px)
   │   └── CategoryTree           (react-arborist tree)
-  └── TransactionTable           (main content area)
-      └── [inline suggestion badges per row]
+  └── TransactionTable           (main content area; receives minConfidence prop)
+      └── [inline suggestion badges per row — dimmed when confidence < minConfidence]
   ```
   
   **`/settings` — `SettingsPage`**
@@ -1445,6 +1521,7 @@
   ```typescript
   interface TransactionTableProps {
     filterCategoryId: number | null;   // from store.activeCategoryId — null = show all
+    minConfidence: number;             // from usePreferences(); suggestions below this are dimmed
   }
   ```
   
@@ -1456,7 +1533,7 @@
     - Type badge
     - Bank name
     - Category (dropdown select for expenses; "—" for income)
-    - Suggestion badge (only when mapping is absent and a suggestion exists; shows suggested category name + confidence %; "Accept" button)
+    - Suggestion badge (only when mapping is absent and a suggestion exists; shows suggested category name + confidence %; "Accept" button; **dimmed at opacity 0.45 when `suggestion.confidence < minConfidence`**, indicating it would not be auto-applied to the Sankey)
   - Pagination controls (page, page_size selector: 25/50/100).
   - Filter bar: date range (reads from store), type toggle, bank select, search input, "Unmapped only" checkbox.
   - "Clear mapping" icon button per expense row.
@@ -1473,13 +1550,14 @@
   
   ```typescript
   interface SankeyDiagramProps {
-    dateFrom: string;  // YYYY-MM-DD
-    dateTo: string;    // YYYY-MM-DD
+    dateFrom: string;       // YYYY-MM-DD
+    dateTo: string;         // YYYY-MM-DD
+    minConfidence: number;  // from usePreferences(); passed to useSankeyData query key
   }
   ```
   
   **What it renders:**
-  - An `ReactECharts` component with `option` built from `useSankeyData(dateFrom, dateTo)`.
+  - An `ReactECharts` component with `option` built from `useSankeyData(dateFrom, dateTo, minConfidence)`.
   - Loading spinner while data loads.
   - Empty state (`<p>No transactions in this period</p>`) when `nodes.length === 0`.
   - `SankeyNodePanel` (slide-in panel) when a category expense node is clicked.
@@ -1576,6 +1654,29 @@
   - Validation: start must not exceed end (inline error).
   
   **Store interactions:** Reads `store.dateRange`; calls `store.setDateRange`.
+  
+  ---
+  
+  ### 7.11 `ConfidenceSlider`
+  
+  **File:** `src/components/shared/ConfidenceSlider.tsx`
+  
+  ```typescript
+  // No external props — reads and writes usePreferences() / useUpdatePreferences()
+  export function ConfidenceSlider(): JSX.Element;
+  ```
+  
+  **What it renders:**
+  - A Mantine `<Slider>` with range 0–1, step 0.05.
+  - A header row showing "ML confidence threshold" (left) and the current value formatted to 2 decimal places (right).
+  - A `"default"` mark at 0.30.
+  
+  **Behavior:**
+  - Uses a local `useState` for the in-drag value (smooth UI); fires the `PUT /api/preferences` mutation only on `onChangeEnd` to avoid per-tick API calls.
+  - On mount (or when the `usePreferences()` response arrives), syncs local state to the DB value via `useEffect`.
+  - Both Dashboard and Transactions pages render this component independently; because both read from the same TanStack Query cache key `["preferences"]` (with `staleTime: Infinity`), the slider is always in sync — the second page doesn't fire a second network request.
+  
+  **Hooks consumed:** `usePreferences`, `useUpdatePreferences`
   
   ---
   
@@ -1744,14 +1845,48 @@
     error: Error | null;
   }
   
-  export function useSankeyData(dateFrom: string, dateTo: string): UseSankeyDataReturn;
+  export function useSankeyData(
+    dateFrom: string,
+    dateTo: string,
+    minConfidence: number,
+  ): UseSankeyDataReturn;
   ```
   
-  **Query key:** `["sankey", dateFrom, dateTo]`
+  **Query key:** `["sankey", dateFrom, dateTo, minConfidence]`
+  
+  Including `minConfidence` in the key means that changing the threshold immediately triggers a new fetch with the updated `min_confidence` query param — the Sankey diagram re-renders without any manual invalidation.
   
   **Configuration:**
   - `staleTime: 30_000` (30 s) — Sankey data is expensive to compute; avoid unnecessary refetches.
   - `enabled: !!dateFrom && !!dateTo` — skips fetch if date range is incomplete.
+  
+  ---
+  
+  ### 8.8 `usePreferences` / `useUpdatePreferences`
+  
+  **File:** `src/hooks/usePreferences.ts`
+  
+  ```typescript
+  export interface Preferences {
+    ml_min_confidence: number;
+  }
+  
+  const DEFAULT_PREFERENCES: Preferences = { ml_min_confidence: 0.3 };
+  
+  export function usePreferences(): UseQueryResult<Preferences>;
+  
+  export function useUpdatePreferences(): UseMutationResult<Preferences, Error, Preferences>;
+  ```
+  
+  **`usePreferences` query key:** `["preferences"]`
+  
+  **Configuration:**
+  - `staleTime: Infinity` — the preference is loaded once and stays in cache until explicitly updated. Re-fetching on every mount would be wasteful; the mutation updates the cache directly on success.
+  - `placeholderData: { ml_min_confidence: 0.3 }` — renders the slider at the compiled-in default immediately, before the first network response arrives. No loading flicker.
+  
+  **`useUpdatePreferences` mutation:**
+  - `mutationFn: savePreferences` → `PUT /api/preferences`
+  - `onSuccess: (data) => queryClient.setQueryData(["preferences"], data)` — updates the cache immediately without a round-trip refetch. Both Dashboard and Transactions pages observe the change instantly since they share the same cache key.
   
   ---
   
@@ -2055,7 +2190,7 @@
   ## 12. Sankey Assembly Algorithm
   
   ```
-  FUNCTION build_sankey(db, date_from, date_to):
+  FUNCTION build_sankey(db, date_from, date_to, min_confidence):
   
     ── Step 1: Query income transactions ──────────────────────────────────────
     income_rows = SELECT id, description, amount
@@ -2111,7 +2246,7 @@
       suggestions = suggester.suggest(db, unmapped_ids)
       all_cat_ids = set(cat_map.keys())  # cat_map loaded in Step 3 above
       FOR s IN suggestions:
-        IF s.confidence >= settings.ml_min_confidence AND s.suggested_category_id IN all_cat_ids:
+        IF s.confidence >= min_confidence AND s.suggested_category_id IN all_cat_ids:
           mapped_by_tx[s.transaction_id] = s.suggested_category_id
         ELSE:
           mapped_by_tx[s.transaction_id] = UNCATEGORIZED_ID  # below threshold or deleted
@@ -2319,7 +2454,7 @@
         LOG_LEVEL: "INFO"
         LOG_FORMAT: "json"
         LOG_DIR: "/logs/backend"
-        ML_MIN_CONFIDENCE: "0.3"
+        ML_MIN_CONFIDENCE: "0.3"      # compiled-in default only; user preference in DB overrides at runtime
         ML_MIN_TRAINING_SAMPLES: "5"
         ML_NGRAM_MIN: "1"
         ML_NGRAM_MAX: "2"

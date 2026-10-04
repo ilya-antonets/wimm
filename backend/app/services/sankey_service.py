@@ -33,6 +33,7 @@ def build_sankey(
     date_from: date,
     date_to: date,
     suggester: MLSuggester,
+    min_confidence: float = settings.ml_min_confidence,
 ) -> SankeyPayload:
     """Assemble the ECharts Sankey payload for a date range.
 
@@ -49,7 +50,7 @@ def build_sankey(
     # category nodes/links. The Expenses hub node is owned by this function so it
     # is present in the income-only case too (income flows straight to Proficit).
     category_nodes, category_links, total_expenses = _expense_nodes_and_links(
-        db, date_from, date_to, suggester
+        db, date_from, date_to, suggester, min_confidence
     )
 
     # Early return: nothing to render for this period.
@@ -115,6 +116,7 @@ def _expense_nodes_and_links(
     date_from: date,
     date_to: date,
     suggester: MLSuggester,
+    min_confidence: float = settings.ml_min_confidence,
 ) -> tuple[list[SankeyNode], list[SankeyLink], Decimal]:
     # Step 3: category metadata.
     cat_map: dict[int, Category] = {c.id: c for c in db.scalars(select(Category))}
@@ -142,7 +144,7 @@ def _expense_nodes_and_links(
 
     if unmapped_ids:
         for s in suggester.suggest(db, unmapped_ids):
-            if s.confidence >= settings.ml_min_confidence and s.suggested_category_id in cat_map:
+            if s.confidence >= min_confidence and s.suggested_category_id in cat_map:
                 mapped_by_tx[s.transaction_id] = s.suggested_category_id
             else:
                 # Below threshold or category deleted since the suggestion → safety net.

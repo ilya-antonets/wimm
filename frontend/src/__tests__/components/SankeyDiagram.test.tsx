@@ -35,9 +35,10 @@ const populated: SankeyPayload = {
 };
 
 function renderDiagram() {
-  return renderWithProviders(<SankeyDiagram dateFrom="2026-09-01" dateTo="2026-09-30" />, {
-    withQuery: true,
-  });
+  return renderWithProviders(
+    <SankeyDiagram dateFrom="2026-09-01" dateTo="2026-09-30" minConfidence={0.3} />,
+    { withQuery: true }
+  );
 }
 
 describe("SankeyDiagram", () => {
