@@ -130,7 +130,8 @@ describe("BankConfigModal", () => {
     expect((posted as PostBody | null)?.column_map).toMatchObject({ memo: "Memo" });
   });
 
-  it("shows a validation toast and does not close when required fields are blank", async () => {    const user = userEvent.setup();
+  it("shows a validation toast and does not close when required fields are blank", async () => {
+    const user = userEvent.setup();
     const errorSpy = vi.spyOn(toast, "error").mockImplementation(() => "");
 
     const { onClose } = renderModal(null);

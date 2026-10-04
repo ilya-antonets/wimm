@@ -136,11 +136,15 @@ def import_csv(
         raise ValidationError(f"No parseable rows found in CSV. {summary}")
 
     # 7. Pre-filter known duplicates with a portable SELECT
-    existing = db.execute(
-        select(Transaction.dedup_key, Transaction.description).where(
-            Transaction.dedup_key.in_([r["dedup_key"] for r in valid_rows])
+    existing = (
+        db.execute(
+            select(Transaction.dedup_key, Transaction.description).where(
+                Transaction.dedup_key.in_([r["dedup_key"] for r in valid_rows])
+            )
         )
-    ).all()
+        .tuples()
+        .all()
+    )
     existing_desc: dict[str, str] = dict(existing)
 
     new_rows = [r for r in valid_rows if r["dedup_key"] not in existing_desc]
