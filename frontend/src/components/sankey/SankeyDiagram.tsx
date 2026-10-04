@@ -9,6 +9,7 @@ import type { SankeyPayload } from "../../types";
 interface SankeyDiagramProps {
   dateFrom: string; // YYYY-MM-DD
   dateTo: string; // YYYY-MM-DD
+  minConfidence: number;
 }
 
 /** Click payload ECharts hands back — `name` holds the node's `SankeyNode.id`. */
@@ -74,8 +75,12 @@ function buildOption(payload: SankeyPayload): Record<string, unknown> {
  * the drill-down panel through the shared store; income and separator nodes
  * (Expenses/Proficit/Deficit) have no ids and are ignored.
  */
-export function SankeyDiagram({ dateFrom, dateTo }: SankeyDiagramProps): JSX.Element {
-  const { payload, isLoading, error } = useSankeyData(dateFrom, dateTo);
+export function SankeyDiagram({
+  dateFrom,
+  dateTo,
+  minConfidence,
+}: SankeyDiagramProps): JSX.Element {
+  const { payload, isLoading, error } = useSankeyData(dateFrom, dateTo, minConfidence);
   const openSankeyPanel = useAppStore((s) => s.openSankeyPanel);
 
   if (isLoading) {

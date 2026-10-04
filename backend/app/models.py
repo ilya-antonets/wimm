@@ -140,3 +140,10 @@ class Mapping(Base):
         return self.category.name
 
     __table_args__ = (Index("ix_mappings_category_id", "category_id"),)
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    ml_min_confidence: Mapped[float] = mapped_column(nullable=False, default=0.3)

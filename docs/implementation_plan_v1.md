@@ -2,7 +2,7 @@
 
 ## Context
 
-WIMM ("Where is my money") is a personal finance tracker that ingests bank CSV statements, manages a category tree, and renders an interactive Sankey diagram. The repository contains only documentation (`docs/`) and a stub README — zero implementation code exists. All design decisions are recorded in `docs/design_v1.md` (3742 lines), `docs/architecture_v1.md`, and `docs/requirements_v1.md`. This plan breaks the full build into 13 stages, each merging as its own PR. A GitHub Actions CI workflow is established in Stage 0 and gates every subsequent PR.
+WIMM ("Where is my money") is a personal finance tracker that ingests bank CSV statements, manages a category tree, and renders an interactive Sankey diagram. The repository contains only documentation (`docs/`) and a stub README — zero implementation code exists. All design decisions are recorded in `docs/design_v1.md` (3742 lines), `docs/architecture_v1.md`, and `docs/requirements_v1.md`. This plan breaks the full build into 14 stages, each merging as its own PR. A GitHub Actions CI workflow is established in Stage 0 and gates every subsequent PR.
 
 **Stack:** Python 3.12 + FastAPI / SQLite + SQLAlchemy + Alembic / scikit-learn TF-IDF  
 **Frontend:** React 18 + TypeScript + Vite / ECharts / react-arborist / TanStack Table+Query / Zustand  
@@ -26,6 +26,7 @@ Stage 0 (CI + .gitignore)
                     └── Stage 10 (transactions UI)
                             └── Stage 11 (dashboard + Sankey UI)
                                     └── Stage 12 (Docker Compose)
+                                            └── Stage 13 (user preferences + confidence slider)
 ```
 
 Backend stages 1–7 are strictly sequential within each path (Stage 5 requires both Stage 2 and Stage 4). Frontend stages 8–11 are strictly sequential. Stage 12 depends on both tracks being complete.
@@ -364,3 +365,58 @@ After Stage 12:
 4. Settings: create a bank, upload a CSV → import summary shown with new/duplicate counts
 5. Transactions: category tree visible (react-arborist), transactions listed with mapping dropdowns, suggestion badges on unmapped expense rows
 6. Dashboard: date picker, Sankey diagram renders with income/expense/balance nodes, clicking an expense category node opens drill-down panel showing individual transactions
+
+---
+
+## Stage 13 — User Preferences + Confidence Slider
+**Status: COMPLETED**
+**PR:** `feat: user-configurable ML confidence threshold with persistence and confidence slider`
+
+Exposes the `ml_min_confidence` threshold in the UI, persists it in the DB, and applies it to both the Sankey diagram (server-side) and the transaction suggestion badges (client-side visual dimming).
+
+### Backend files created/modified
+
+- `backend/alembic/versions/002_user_preferences.py` (new) — creates `user_preferences` table; seeds singleton row `(id=1, ml_min_confidence=0.3)`
+- `backend/app/models.py` — appended `UserPreference` ORM model (singleton: id always 1)
+- `backend/app/schemas/preferences.py` (new) — `PreferencesRead` / `PreferencesWrite` (validates ge=0.0, le=1.0)
+- `backend/app/routers/preferences.py` (new) — `GET /api/preferences`, `PUT /api/preferences`; `_get_or_create` guard for fresh installs
+- `backend/app/main.py` — added `preferences` to multi-line router import + `app.include_router(preferences.router)`
+- `backend/app/services/sankey_service.py` — `build_sankey` and `_expense_nodes_and_links` gain `min_confidence: float = settings.ml_min_confidence` param; line 145 uses the param instead of the global setting
+- `backend/app/routers/sankey.py` — added `min_confidence: float = Query(settings.ml_min_confidence, ge=0.0, le=1.0)` query param; passed to `build_sankey`
+
+### Backend tests created/modified
+
+- `backend/tests/routers/test_preferences.py` (new, 4 tests):
+  - `GET /api/preferences` returns `{ml_min_confidence: 0.3}` by default
+  - `PUT /api/preferences` persists new value
+  - `GET /api/preferences` after `PUT` returns updated value
+  - `PUT` with value outside 0–1 returns 422
+- `backend/tests/test_sankey_service.py` — 1 new test: `test_low_confidence_accepted_when_threshold_lowered` verifies that passing `min_confidence=0.0` causes a low-confidence (0.1) suggestion to be applied rather than falling back to Uncategorized
+
+### Frontend files created/modified
+
+- `frontend/src/services/preferencesService.ts` (new) — `fetchPreferences` / `savePreferences` Axios helpers
+- `frontend/src/hooks/usePreferences.ts` (new) — `usePreferences()` (`staleTime: Infinity`, `placeholderData: {ml_min_confidence: 0.3}`) + `useUpdatePreferences()` (sets cache directly on success)
+- `frontend/src/components/shared/ConfidenceSlider.tsx` (new) — Mantine `<Slider>` with local state for smooth drag; fires `PUT /api/preferences` on `onChangeEnd`; marks `[{value: 0.3, label: "default"}]`
+- `frontend/src/pages/DashboardPage.tsx` — renders `<ConfidenceSlider />` between `<DateRangePicker />` and `<SankeyDiagram>`; reads `minConfidence` from `usePreferences()` and passes to `<SankeyDiagram>`
+- `frontend/src/components/sankey/SankeyDiagram.tsx` — added `minConfidence: number` prop; passes to `useSankeyData`
+- `frontend/src/hooks/useSankeyData.ts` — signature updated to `useSankeyData(dateFrom, dateTo, minConfidence)`; query key is `["sankey", dateFrom, dateTo, minConfidence]`; `fetchSankey` called with `minConfidence`
+- `frontend/src/services/sankeyService.ts` — `fetchSankey` gains `minConfidence` param; passes as `min_confidence` query param to `/sankey`
+- `frontend/src/pages/TransactionsPage.tsx` — renders `<ConfidenceSlider />`; reads `minConfidence` and passes to `<TransactionTable>`
+- `frontend/src/components/transactions/TransactionTable.tsx` — `TransactionTableProps` gains `minConfidence: number`; suggestion badges rendered with `opacity: 0.45` and class `suggestion-badge--low` when `suggestion.confidence < minConfidence`
+
+### Frontend tests modified
+
+- `frontend/src/__tests__/mocks/handlers.ts` — added `GET /api/preferences` → `{ml_min_confidence: 0.3}` and `PUT /api/preferences` echo mock
+- `frontend/src/__tests__/components/SankeyDiagram.test.tsx` — added `minConfidence={0.3}` prop to all `renderDiagram` calls
+- `frontend/src/__tests__/components/TransactionTable.test.tsx` — added `minConfidence={0.3}` prop to all `renderTable` calls
+- `frontend/src/__tests__/hooks/useSankeyData.test.tsx` — added `0.3` as third argument to all `useSankeyData(...)` calls
+
+### Tests
+All existing CI checks pass (ruff, mypy, pytest ≥ 85%/90%, ESLint, tsc, Prettier, Vitest coverage gates).
+
+### Verification
+1. `GET /api/preferences` → `{"ml_min_confidence": 0.3}`
+2. Dashboard → confidence slider shows 0.3; drag to 0.5 → Sankey refetches with `min_confidence=0.5`; more expenses land in Uncategorized
+3. Transactions → same slider value on both pages; suggestion badges below threshold are dimmed (opacity 0.45)
+4. Refresh → slider restores from DB value

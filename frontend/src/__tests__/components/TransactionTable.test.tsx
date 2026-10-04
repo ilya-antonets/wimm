@@ -10,9 +10,10 @@ import { server } from "../mocks/server";
 const API = "http://localhost:8000/api";
 
 function renderTable(filterCategoryId: number | null = null) {
-  return renderWithProviders(<TransactionTable filterCategoryId={filterCategoryId} />, {
-    withQuery: true,
-  });
+  return renderWithProviders(
+    <TransactionTable filterCategoryId={filterCategoryId} minConfidence={0.3} />,
+    { withQuery: true }
+  );
 }
 
 describe("TransactionTable", () => {

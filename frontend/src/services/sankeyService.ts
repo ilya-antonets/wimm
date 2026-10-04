@@ -7,9 +7,13 @@ import { apiClient } from "./api";
  * given period (income → expenses → balance). Paths omit the `/api` prefix — it
  * lives in the axios `baseURL` (see `api.ts`). Dates are `YYYY-MM-DD`.
  */
-export async function fetchSankey(dateFrom: string, dateTo: string): Promise<SankeyPayload> {
+export async function fetchSankey(
+  dateFrom: string,
+  dateTo: string,
+  minConfidence: number
+): Promise<SankeyPayload> {
   const { data } = await apiClient.get<SankeyPayload>("/sankey", {
-    params: { date_from: dateFrom, date_to: dateTo },
+    params: { date_from: dateFrom, date_to: dateTo, min_confidence: minConfidence },
   });
   return data;
 }

@@ -143,4 +143,9 @@ export const handlers = [
     return HttpResponse.json(result, { status: 201 });
   }),
   http.get(`${API}/sankey`, () => HttpResponse.json(mockSankey)),
+  http.get(`${API}/preferences`, () => HttpResponse.json({ ml_min_confidence: 0.3 })),
+  http.put(`${API}/preferences`, async ({ request }) => {
+    const body = (await request.json()) as { ml_min_confidence: number };
+    return HttpResponse.json(body);
+  }),
 ];

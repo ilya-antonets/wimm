@@ -3,6 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.exceptions import ValidationError
 from app.schemas.sankey import SankeyPayload
@@ -17,7 +18,8 @@ def get_sankey(
     db: Session = Depends(get_db),
     date_from: date = Query(...),
     date_to: date = Query(...),
+    min_confidence: float = Query(settings.ml_min_confidence, ge=0.0, le=1.0),
 ) -> SankeyPayload:
     if date_from > date_to:
         raise ValidationError("date_from must not be after date_to")
-    return build_sankey(db, date_from, date_to, get_suggester())
+    return build_sankey(db, date_from, date_to, get_suggester(), min_confidence)
