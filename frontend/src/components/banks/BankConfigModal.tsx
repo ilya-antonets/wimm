@@ -22,6 +22,7 @@ interface FormState {
   col_amount: string;
   col_description: string;
   col_transaction_id: string;
+  col_memo: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -34,6 +35,7 @@ const EMPTY_FORM: FormState = {
   col_amount: "",
   col_description: "",
   col_transaction_id: "",
+  col_memo: "",
 };
 
 function columnValue(v: string | number): string {
@@ -52,6 +54,7 @@ function fromBank(bank: BankRead): FormState {
     col_description: columnValue(bank.column_map.description),
     col_transaction_id:
       bank.column_map.transaction_id != null ? columnValue(bank.column_map.transaction_id) : "",
+    col_memo: bank.column_map.memo != null ? columnValue(bank.column_map.memo) : "",
   };
 }
 
@@ -99,6 +102,9 @@ export function BankConfigModal({ bank, open, onClose }: BankConfigModalProps): 
     };
     if (form.col_transaction_id.trim() !== "") {
       map.transaction_id = resolveColumn(form.col_transaction_id, original?.transaction_id);
+    }
+    if (form.col_memo.trim() !== "") {
+      map.memo = resolveColumn(form.col_memo, original?.memo);
     }
     return map;
   };
@@ -195,6 +201,11 @@ export function BankConfigModal({ bank, open, onClose }: BankConfigModalProps): 
                 label="Transaction ID column (optional)"
                 value={form.col_transaction_id}
                 onChange={set("col_transaction_id")}
+              />
+              <TextInput
+                label="Memo column (optional)"
+                value={form.col_memo}
+                onChange={set("col_memo")}
               />
             </Stack>
           </Fieldset>

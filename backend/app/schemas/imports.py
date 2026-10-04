@@ -11,5 +11,6 @@ class ImportResult(BaseModel):
     import_batch_id: int | None
     total_rows_parsed: int
     new_transactions: int
+    updated_transactions: int = 0
     duplicate_transactions: int
     failed_rows: list[FailedRow]

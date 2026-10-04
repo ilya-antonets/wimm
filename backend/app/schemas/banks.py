@@ -6,6 +6,7 @@ class ColumnMap(BaseModel):
     amount: str | int
     description: str | int
     transaction_id: str | int | None = None
+    memo: str | int | None = None
 
 
 class BankCreate(BaseModel):

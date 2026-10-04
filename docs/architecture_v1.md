@@ -97,7 +97,7 @@ Five tables. The category tree uses an **adjacency list** — the simplest repre
 |---|---|---|
 | id | INTEGER PK | |
 | name | TEXT NOT NULL | Display name (e.g. "My Bank") |
-| column_map | JSON | Maps semantic fields to CSV column indices/names: `date`, `amount`, `description`, and optionally `transaction_id` (bank-provided unique ID) |
+| column_map | JSON | Maps semantic fields to CSV column indices/names: `date`, `amount`, `description`, optionally `transaction_id` (bank-provided unique ID), and optionally `memo` (fallback used when `description` is empty — see §4.2) |
 | date_format | TEXT | strftime format string for the date column (e.g. `%d.%m.%Y`) |
 | skip_header_rows | INTEGER | Rows before the CSV header row to skip (bank metadata lines); default 0 |
 | skip_footer_rows | INTEGER | Rows after the last data row to skip (balance summary lines); default 0 |
@@ -118,10 +118,10 @@ Five tables. The category tree uses an **adjacency list** — the simplest repre
 |---|---|---|
 | id | INTEGER PK | |
 | bank_id | FK → banks | |
-| import_batch_id | FK → import_batches NULLABLE | First (and only) batch that introduced this row — `INSERT OR IGNORE` never updates existing rows |
+| import_batch_id | FK → import_batches NULLABLE | First (and only) batch that introduced this row — the import never reassigns it, though a reimport may back-fill an empty `description` (see §4.2) |
 | date | DATE | |
 | amount | NUMERIC(12,4) | Signed: positive = income, negative = expense |
-| description | TEXT | Raw payee/description from bank statement |
+| description | TEXT | Payee/description from the bank statement; if that column is empty and the bank maps a `memo` column, the memo value is stored here instead (see §4.2) |
 | type | TEXT | `income` or `expense` — derived from amount sign (or bank-specific logic) at import time |
 | **dedup_key** | TEXT UNIQUE NOT NULL | Deduplication anchor — see §4.2 |
 
@@ -149,9 +149,13 @@ Idempotent import is enforced at the transaction level via `dedup_key`, not at t
 - If the bank exports a unique transaction ID (configured in `banks.column_map`):
   `dedup_key = "{bank_id}:{external_transaction_id}"`
 - Otherwise:
-  `dedup_key = hex(SHA-256(f"{bank_id}|{date}|{Decimal(amount).quantize(Decimal('0.01'))}|{description}".encode()))`
+  `dedup_key = hex(SHA-256(f"{bank_id}|{date}|{Decimal(amount).quantize(Decimal('0.01'))}|{raw_description}".encode()))`
 
-On import, each row is inserted with `INSERT OR IGNORE`. Overlapping date ranges and re-uploaded files are handled silently. The user receives a summary: _"12 new transactions imported, 8 already existed."_
+The hash uses the **raw** description column (before the memo fallback below), so the key stays stable regardless of whether a `memo` column is mapped.
+
+**Memo fallback for empty descriptions.** A bank may optionally map a `memo` column. When a row's `description` column is empty and the memo has a value, the memo is stored in the `description` field (there is no separate memo column). A mapped memo column that is absent from a given file is tolerated silently.
+
+On import, genuinely new rows (unseen `dedup_key`) are inserted. Rows whose `dedup_key` already exists are skipped **except** when the stored `description` is empty and the row now yields a non-empty value (from the memo fallback) — those existing rows are **updated** (back-filled). A non-empty stored description is never overwritten. The user receives a summary: _"12 new transactions imported, 3 descriptions updated, 8 already existed."_
 
 ### 4.3 Category tree traversal (subtree aggregation)
 
@@ -340,7 +344,7 @@ Once implementation begins, these are the critical files to create or modify:
 |---|---|
 | `backend/app/models.py` | SQLAlchemy ORM definitions for all five tables, including the self-referential `categories` relationship and the `dedup_key` unique constraint |
 | `backend/alembic/versions/001_initial_schema.py` | Initial migration: creates all tables and seeds the "Uncategorized" category (id=1) |
-| `backend/app/services/csv_importer.py` | pandas-based CSV parser; applies `skip_header_rows`/`skip_footer_rows`/`encoding` from `banks.column_map`; computes `dedup_key`; uses `INSERT OR IGNORE` |
+| `backend/app/services/csv_importer.py` | pandas-based CSV parser; applies `skip_header_rows`/`skip_footer_rows`/`encoding` from `banks.column_map`; computes `dedup_key`; inserts new rows and back-fills empty descriptions from the optional `memo` column on reimport (pre-SELECT by `dedup_key`, not `INSERT OR IGNORE`) |
 | `backend/app/services/ml_suggester.py` | TF-IDF vectorizer, payee fingerprint cache, cosine similarity pipeline |
 | `backend/app/routers/sankey.py` | Assembles `{ nodes, links }` payload via recursive CTE aggregation for a given date range |
 | `frontend/src/components/SankeyDiagram.tsx` | ECharts Sankey wrapper; renders the payload from `/api/sankey` |

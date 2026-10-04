@@ -208,6 +208,7 @@
       amount: str | int
       description: str | int
       transaction_id: str | int | None = None  # bank-provided external ID column
+      memo: str | int | None = None            # fallback column stored when description is empty
   
   class BankCreate(BaseModel):
       name: str = Field(..., min_length=1, max_length=120)
@@ -274,15 +275,16 @@
     - `bank_id: int` (required)
     - `file: UploadFile` — CSV file (content-type checked; reject if not `text/csv` or `.csv` extension)
   - **Response 201:** `ImportResult` — at least one new transaction inserted (`new_transactions > 0`)
-- **Response 200:** `ImportResult` — all rows already existed (`new_transactions = 0`)
+- **Response 200:** `ImportResult` — no new transactions inserted (`new_transactions = 0`); existing rows may still have been updated (`updated_transactions > 0`)
   
   ```python
   # schemas/imports.py
   
   class ImportResult(BaseModel):
-      import_batch_id: int | None  # None when all rows were duplicates (no batch created)
+      import_batch_id: int | None  # None when no new rows were inserted (no batch created)
       total_rows_parsed: int
       new_transactions: int
+      updated_transactions: int = 0  # existing rows whose empty description was back-filled from memo
       duplicate_transactions: int
       failed_rows: list[FailedRow]
   
@@ -294,7 +296,7 @@
   
   - **Error 400:** `bank_id` not found, file missing, file not parseable with the bank's config (e.g., wrong encoding, missing columns), or zero data rows after skip.
   - **Error 422:** Form validation failure (missing `bank_id`).
-  - **Side effects:** Creates one `import_batches` row and inserts transactions only when `new_transactions > 0`; when all rows are already present no batch row is created and `import_batch_id` is `null`. Invalidates the ML vectorizer cache so the next Sankey build or `POST /api/suggestions` call re-fits the model with the newly imported transactions (O(1) synchronous call — no ML inference during import).
+  - **Side effects:** Creates one `import_batches` row and inserts transactions only when `new_transactions > 0`; when no new rows are inserted, no batch row is created and `import_batch_id` is `null`. A reimport may still update existing rows (`updated_transactions > 0`) by back-filling an empty `description` from the bank's mapped `memo` column — such updates do not create a batch and do not change the row's original `import_batch_id`. Invalidates the ML vectorizer cache so the next Sankey build or `POST /api/suggestions` call re-fits the model with the newly imported (or updated) transactions (O(1) synchronous call — no ML inference during import).
   
   ---
   
@@ -676,28 +678,34 @@
          - skipfooter=bank.skip_footer_rows (requires engine='python')
          - encoding already handled (StringIO from decoded str)
       3. Rename columns via column_map to canonical names:
-         date_col, amount_col, description_col, [transaction_id_col]
+         date_col, amount_col, description_col, [transaction_id_col], [memo_col]
+         A mapped memo_col that is absent from the file is tolerated (treated as unmapped).
       4. Drop rows where all canonical columns are NaN.
       5. For each row:
          a. Parse date using bank.date_format → Python date.
          b. Cast amount to Decimal; positive (amount > 0) → type='income', negative or zero → type='expense'.
          c. Compute dedup_key:
             - If transaction_id_col present: require a non-empty value — empty → fail the row (add to failed_rows, continue). When non-empty: f"{bank.id}:{row.transaction_id}"
-            - Else: hex(sha256(f"{bank.id}|{date}|{Decimal(amount).quantize(Decimal('0.01'))}|{description}".encode()))
+            - Else: hex(sha256(f"{bank.id}|{date}|{Decimal(amount).quantize(Decimal('0.01'))}|{raw_description}".encode()))
             Using transaction_id_col when configured ensures all rows for a bank use a
             consistent key format; mixing formats across imports would allow duplicates.
-         d. Collect as dict; record failed rows with row number and error message.
+            The hash uses the raw description (not the memo fallback) so the key is stable
+            whether or not a memo column is mapped.
+         d. Determine the stored description: use the description column; if it is empty and
+            memo_col is mapped with a non-empty value, store the memo value instead.
+         e. Collect as dict; record failed rows with row number and error message.
       6. If zero parseable rows: raise ValidationError(400) with the first 5 per-row errors included — no DB write has occurred.
-      7. SELECT existing dedup_key values from transactions to identify already-imported rows.
-         Filter valid_rows to new_rows = [r for r if r["dedup_key"] not in existing_keys].
-      8. If new_rows is empty: return ImportResult(import_batch_id=None, new_transactions=0, ...) — no DB write.
+      7. SELECT existing (dedup_key, description) pairs to classify rows: new (unseen key) →
+         inserted; update (key present AND stored description empty AND new description non-empty)
+         → back-filled; the rest are true duplicates. A non-empty stored description is never overwritten.
+      8. Apply description back-fills (UPDATE by dedup_key). If new_rows is empty: return ImportResult(import_batch_id=None, new_transactions=0, updated_transactions=len(update_rows), ...) — no batch created.
       9. Create ImportBatch record; flush to get ID. Assign import_batch_id to each new_rows entry.
       10. Bulk-insert new_rows using plain INSERT INTO transactions (...) VALUES (...) via SQLAlchemy core.
           (Caller — the router — calls db.commit() after this function returns.)
       """
   
   def _compute_dedup_key(bank_id: int, date: str, amount: Decimal, description: str) -> str:
-      """Internal: SHA-256 fallback dedup key. Normalises amount to 2 d.p. before hashing."""
+      """Internal: SHA-256 fallback dedup key over the RAW description. Normalises amount to 2 d.p. before hashing."""
   
   def _normalize_column_ref(ref: str | int, df_columns: list[str]) -> str:
       """
@@ -709,6 +717,8 @@
   
   **Key invariants:**
   - Duplicate rows are identified via a pre-SELECT of existing `dedup_key` values; only genuinely new rows are inserted with a plain INSERT.
+  - The dedup key hashes the **raw** description column, so mapping a `memo` column (which only affects the *stored* description) never changes a row's identity.
+  - On reimport, an existing row whose stored `description` is empty is back-filled from the memo fallback (`updated_transactions`); a non-empty stored description is never overwritten.
   - When `transaction_id` is configured for the bank, every row must supply a non-empty value — a missing value is treated as a parse failure, not a silent hash fallback. This keeps the dedup key format consistent across all imports for a given bank.
   - `failed_rows` accumulates per-row errors without aborting the entire import.
   - A row with a parse failure is counted in `failed_rows` and skipped, not inserted.
@@ -1361,7 +1371,7 @@
   
   **What it renders:**
   - A modal dialog with a form containing inputs for: `name`, `date_format`, `encoding`, `skip_header_rows`, `skip_footer_rows`.
-  - A sub-form for `column_map` with 4 fields: `date`, `amount`, `description`, `transaction_id` (optional).
+  - A sub-form for `column_map` with 5 fields: `date`, `amount`, `description`, `transaction_id` (optional), `memo` (optional — stored as the description when the description column is empty).
   - Save / Cancel buttons.
   - In edit mode: a "Delete Bank" button (shows `ConfirmDialog` before executing delete mutation; blocked if bank has transactions — error toast).
   
@@ -2682,6 +2692,11 @@
   | `test_import_encoding_latin1` | CSV with `encoding=latin-1` → decoded correctly |
   | `test_import_invalid_date_format` | Mismatched `date_format` → raises `CSVParseError` |
   | `test_import_missing_required_column` | CSV missing amount column → raises `CSVParseError` |
+  | `test_import_memo_fills_empty_description` | Bank with `column_map.memo` set → empty description row stores the memo value; non-empty description keeps its own value |
+  | `test_import_reimport_backfills_empty_description` | Row first stored with an empty description, reimported with memo mapped → `updated_transactions=1`, no new/duplicate row created, description back-filled (both hash and `transaction_id` dedup) |
+  | `test_import_reimport_memo_idempotent` | Repeating a memo back-fill reimport → `updated_transactions=0`, `duplicate_transactions` counts the row |
+  | `test_import_memo_never_overwrites_nonempty` | Reimport with a memo does not overwrite a non-empty stored description |
+  | `test_import_memo_column_absent_tolerated` | Bank maps a memo column that a given file lacks → import still succeeds |
   
   #### `tests/test_ml_suggester.py`
   
@@ -2746,6 +2761,7 @@
   |---|---|
   | `test_upload_valid_csv` | 201 response; `new_transactions` > 0 |
   | `test_upload_duplicate_csv` | 200 response; `new_transactions=0`, `duplicate_transactions` > 0 |
+  | `test_upload_reimport_updates_descriptions` | Reimport back-filling empty descriptions from memo → 200 response; `updated_transactions` > 0 |
   | `test_upload_wrong_bank_id` | 404 when bank_id not found |
   | `test_upload_malformed_csv` | 422 with error detail |
   | `test_upload_triggers_suggestions` | After import, newly created expenses have ML suggestions available via POST /api/suggestions |
